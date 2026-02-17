@@ -61,6 +61,9 @@ final class AppCoordinator: NSObject {
         optionTapRecognizer.onValidTap = { [weak self] in
             self?.handleOptionTap()
         }
+        optionTapRecognizer.onOptionKeyDown = { [weak self] in
+            self?.handleOptionKeyDown() ?? false
+        }
         optionTapRecognizer.onEscapeKeyDown = { [weak self] in
             self?.handleEscapeKey()
         }
@@ -157,6 +160,16 @@ final class AppCoordinator: NSObject {
         case .transcribing:
             return
         }
+    }
+
+    private func handleOptionKeyDown() -> Bool {
+        guard state == .recording else {
+            return false
+        }
+        Task { [weak self] in
+            await self?.stopAndTranscribeFlow()
+        }
+        return true
     }
 
     private func handleEscapeKey() {

@@ -20,6 +20,7 @@ final class OptionTapRecognizer: @unchecked Sendable {
     private var escapeInterceptionEnabled = false
 
     var onValidTap: (() -> Void)?
+    var onOptionKeyDown: (() -> Bool)?
     var onEscapeKeyDown: (() -> Void)?
 
     init(settingsProvider: @escaping SettingsProvider) {
@@ -200,12 +201,19 @@ final class OptionTapRecognizer: @unchecked Sendable {
     }
 
     private func processFlagsChange(optionIsDown: Bool, hasOtherModifiers: Bool, timestamp: TimeInterval) {
-        if validator.registerFlagsChange(
+        let wasOptionDown = validator.optionIsDown
+        let isValidTap = validator.registerFlagsChange(
             optionIsDown: optionIsDown,
             hasOtherModifiers: hasOtherModifiers,
             timestamp: timestamp,
             settings: settingsProvider()
-        ) {
+        )
+
+        if optionIsDown, !wasOptionDown, !hasOtherModifiers, onOptionKeyDown?() == true {
+            validator.invalidateCurrentTap()
+        }
+
+        if isValidTap {
             onValidTap?()
         }
     }

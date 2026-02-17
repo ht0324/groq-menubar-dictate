@@ -108,4 +108,25 @@ final class OptionTapValidatorTests: XCTestCase {
             )
         )
     }
+
+    func testInvalidateCurrentTapSuppressesRelease() {
+        var validator = OptionTapValidator()
+        XCTAssertFalse(
+            validator.registerFlagsChange(
+                optionIsDown: true,
+                hasOtherModifiers: false,
+                timestamp: 30.0,
+                settings: settings
+            )
+        )
+        validator.invalidateCurrentTap()
+        XCTAssertFalse(
+            validator.registerFlagsChange(
+                optionIsDown: false,
+                hasOtherModifiers: false,
+                timestamp: 30.1,
+                settings: settings
+            )
+        )
+    }
 }

@@ -65,4 +65,10 @@ struct OptionTapValidator {
             invalidTap = true
         }
     }
+
+    mutating func invalidateCurrentTap() {
+        if optionIsDown {
+            invalidTap = true
+        }
+    }
 }

@@ -11,6 +11,44 @@ struct SettingsSnapshot {
     var languageHint: String
 }
 
+private final class SettingsWindow: NSWindow {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.type == .keyDown else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        let modifierFlags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard modifierFlags == .command,
+              let key = event.charactersIgnoringModifiers?.lowercased()
+        else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        let selector: Selector?
+        switch key {
+        case "x":
+            selector = #selector(NSText.cut(_:))
+        case "c":
+            selector = #selector(NSText.copy(_:))
+        case "v":
+            selector = #selector(NSText.paste(_:))
+        case "a":
+            selector = #selector(NSText.selectAll(_:))
+        default:
+            selector = nil
+        }
+
+        guard let selector else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        if NSApp.sendAction(selector, to: nil, from: self) {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
 final class SettingsWindowController: NSWindowController {
     private let onSave: (SettingsSnapshot) -> Void
     private let onOpenWordsFile: () -> Void
@@ -37,7 +75,7 @@ final class SettingsWindowController: NSWindowController {
         self.onOpenEndPrunePhrasesFile = onOpenEndPrunePhrasesFile
         self.onTestPermissions = onTestPermissions
 
-        let window = NSWindow(
+        let window = SettingsWindow(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 430),
             styleMask: [.titled, .closable],
             backing: .buffered,
