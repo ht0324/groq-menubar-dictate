@@ -1,6 +1,7 @@
 # groq-menubar-dictate
 
-Minimal macOS menu bar dictation app using Groq transcription.
+Super-fast, lightweight macOS menu bar dictation using Groq transcription.
+Bare-bones by design: tap Option, speak, and get text. It just works.
 
 ## Behavior
 
@@ -15,11 +16,22 @@ Minimal macOS menu bar dictation app using Groq transcription.
   - `thank you`, `thank you for watching`, `thanks for watching` (case-insensitive, optional period)
 - Menu bar click is only for settings/status, not for recording control.
 
+## Performance Snapshot (MacBook M1 Pro)
+
+- CPU: mostly `0.0%`, peak `1.0%`
+- Memory (`top MEM`): about `23 MB`
+- Memory (`ps RSS`): `64000 KB` (about `62.5 MB`, `%MEM 0.4`)
+- Designed to stay lean during idle + short dictation bursts.
+- In day-to-day use, this stays far lighter than heavier desktop transcription apps that can reach around `300 MB+`.
+
 ## Features
 
 - Native AppKit menu bar app (`NSStatusBar`, accessory app)
 - Audio capture (`AVAudioRecorder`) to temporary `.m4a`
 - Groq API transcription (`/openai/v1/audio/transcriptions`)
+- Latency-focused flow:
+  - Stop recording on Option key-down while recording
+  - In-memory multipart upload prep (no extra temp upload file)
 - Custom words prompt loaded from:
   - `~/Library/Application Support/groq-menubar-dictate/custom-words.txt`
 - Filter words loaded from:
@@ -67,6 +79,7 @@ If auto-paste or Escape abort is unavailable, grant Input Monitoring / Post Keyb
 
 ## Notes
 
+- Prioritizes speed and simplicity over complex UI/feature bloat.
 - API key is configured in `Open Settings`.
 - Startup behavior is configurable in `Open Settings` via `Launch at login`.
 - End-prune behavior is configurable in `Open Settings` via `Prune transcript ending phrases`.
