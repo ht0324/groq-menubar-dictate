@@ -21,6 +21,23 @@ enum MicrophoneInputMode: String, CaseIterable {
     }
 }
 
+enum OptionKeyMode: String, CaseIterable {
+    case any
+    case left
+    case right
+
+    var title: String {
+        switch self {
+        case .any:
+            return "Either Option key"
+        case .left:
+            return "Left Option only"
+        case .right:
+            return "Right Option only"
+        }
+    }
+}
+
 final class SettingsStore {
     private enum Key {
         static let apiKey = "settings.apiKey"
@@ -29,6 +46,7 @@ final class SettingsStore {
         static let performanceDiagnosticsEnabled = "settings.performanceDiagnosticsEnabled"
         static let launchAtLoginEnabled = "settings.launchAtLoginEnabled"
         static let microphoneInputMode = "settings.microphoneInputMode"
+        static let optionKeyMode = "settings.optionKeyMode"
         static let model = "settings.model"
         static let languageHint = "settings.languageHint"
         static let tapMinMs = "settings.tap.minMs"
@@ -112,6 +130,20 @@ final class SettingsStore {
         }
         set {
             defaults.set(newValue.rawValue, forKey: Key.microphoneInputMode)
+        }
+    }
+
+    var optionKeyMode: OptionKeyMode {
+        get {
+            guard let raw = defaults.string(forKey: Key.optionKeyMode),
+                  let mode = OptionKeyMode(rawValue: raw)
+            else {
+                return .any
+            }
+            return mode
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Key.optionKeyMode)
         }
     }
 

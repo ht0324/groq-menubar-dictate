@@ -23,9 +23,14 @@ final class AppCoordinator: NSObject {
     private let sounds = SoundCuePlayer()
     private let logger = Logger(subsystem: "com.huntae.groq-menubar-dictate", category: "workflow")
 
-    private lazy var optionTapRecognizer = OptionTapRecognizer(settingsProvider: { [weak self] in
-        self?.settings.tapSettings ?? OptionTapSettings(minTapMilliseconds: 20, maxTapMilliseconds: 450, debounceMilliseconds: 250)
-    })
+    private lazy var optionTapRecognizer = OptionTapRecognizer(
+        settingsProvider: { [weak self] in
+            self?.settings.tapSettings ?? OptionTapSettings(minTapMilliseconds: 20, maxTapMilliseconds: 450, debounceMilliseconds: 250)
+        },
+        optionKeyModeProvider: { [weak self] in
+            self?.settings.optionKeyMode ?? .any
+        }
+    )
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
@@ -445,6 +450,7 @@ final class AppCoordinator: NSObject {
             performanceDiagnosticsEnabled: settings.performanceDiagnosticsEnabled,
             launchAtLoginEnabled: launchAtLoginEnabled,
             microphoneInputMode: settings.microphoneInputMode,
+            optionKeyMode: settings.optionKeyMode,
             model: settings.model,
             languageHint: settings.languageHint ?? ""
         )
@@ -475,6 +481,7 @@ final class AppCoordinator: NSObject {
         settings.performanceDiagnosticsEnabled = snapshot.performanceDiagnosticsEnabled
         settings.launchAtLoginEnabled = snapshot.launchAtLoginEnabled
         settings.microphoneInputMode = snapshot.microphoneInputMode
+        settings.optionKeyMode = snapshot.optionKeyMode
         settings.apiKey = snapshot.apiKey
         settings.model = snapshot.model
         settings.languageHint = snapshot.languageHint

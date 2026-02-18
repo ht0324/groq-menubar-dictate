@@ -63,6 +63,34 @@ swift run
 open -a "/Applications/Groq MenuBar Dictate.app"
 ```
 
+### Stable Code Signing (Recommended)
+
+To keep macOS permissions (Input Monitoring / Post Events / Microphone) stable across updates, install with a stable signing identity instead of ad-hoc signing.
+
+List available identities:
+
+```bash
+security find-identity -v -p codesigning
+```
+
+Install with an explicit identity (preferred):
+
+```bash
+GROQ_DICTATE_SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" ./scripts/install_to_applications.sh
+```
+
+Optional hint-based identity matching (for example by email):
+
+```bash
+GROQ_DICTATE_SIGN_IDENTITY_HINT="huntae324@gmail.com" ./scripts/install_to_applications.sh
+```
+
+Ad-hoc signing fallback (not recommended, may reset permissions on every update):
+
+```bash
+GROQ_DICTATE_ALLOW_ADHOC=1 ./scripts/install_to_applications.sh
+```
+
 ## Test
 
 ```bash

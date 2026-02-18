@@ -5,10 +5,14 @@ import Foundation
 
 final class OptionTapRecognizer: @unchecked Sendable {
     typealias SettingsProvider = () -> OptionTapSettings
+    typealias OptionKeyModeProvider = () -> OptionKeyMode
 
     private let settingsProvider: SettingsProvider
+    private let optionKeyModeProvider: OptionKeyModeProvider
     private let disallowedModifiers: NSEvent.ModifierFlags = [.command, .control, .shift, .capsLock, .function]
     private var validator = OptionTapValidator()
+    private var leftOptionDown = false
+    private var rightOptionDown = false
 
     private var globalFlagsMonitor: Any?
     private var globalKeyDownMonitor: Any?
@@ -26,8 +30,12 @@ final class OptionTapRecognizer: @unchecked Sendable {
     var onStopRequested: (() -> Void)?
     var onEscapeKeyDown: (() -> Void)?
 
-    init(settingsProvider: @escaping SettingsProvider) {
+    init(
+        settingsProvider: @escaping SettingsProvider,
+        optionKeyModeProvider: @escaping OptionKeyModeProvider
+    ) {
         self.settingsProvider = settingsProvider
+        self.optionKeyModeProvider = optionKeyModeProvider
     }
 
     deinit {
@@ -55,6 +63,8 @@ final class OptionTapRecognizer: @unchecked Sendable {
                 return
             }
             self.validator = OptionTapValidator()
+            self.leftOptionDown = false
+            self.rightOptionDown = false
             self.stopOnOptionPressEnabled = false
             self.keyDownMonitoringActive = false
         }
@@ -78,6 +88,8 @@ final class OptionTapRecognizer: @unchecked Sendable {
                 return
             }
             self.validator = OptionTapValidator()
+            self.leftOptionDown = false
+            self.rightOptionDown = false
             self.stopOnOptionPressEnabled = false
             self.keyDownMonitoringActive = false
         }
@@ -168,9 +180,11 @@ final class OptionTapRecognizer: @unchecked Sendable {
         let optionIsDown = flags.contains(.option)
         let hasOtherModifiers = !flags.intersection(disallowedModifiers).isEmpty
         let timestamp = event.timestamp
+        let keyCode = event.keyCode
         eventQueue.async { [weak self] in
             self?.processFlagsChange(
-                optionIsDown: optionIsDown,
+                flagsContainOption: optionIsDown,
+                keyCode: keyCode,
                 hasOtherModifiers: hasOtherModifiers,
                 timestamp: timestamp
             )
@@ -263,19 +277,28 @@ final class OptionTapRecognizer: @unchecked Sendable {
         return nil
     }
 
-    private func processFlagsChange(optionIsDown: Bool, hasOtherModifiers: Bool, timestamp: TimeInterval) {
-        let wasOptionDown = validator.optionIsDown
+    private func processFlagsChange(
+        flagsContainOption: Bool,
+        keyCode: UInt16,
+        hasOtherModifiers: Bool,
+        timestamp: TimeInterval
+    ) {
+        let mode = currentOptionKeyMode()
+        let wasOptionDown = optionIsDown(for: mode)
+        updateOptionSideState(flagsContainOption: flagsContainOption, keyCode: keyCode)
+        let optionIsDown = optionIsDown(for: mode)
+        let effectiveHasOtherModifiers = hasOtherModifiers || hasUnselectedOptionDown(for: mode)
         let settings = currentTapSettings()
         let isValidTap = validator.registerFlagsChange(
             optionIsDown: optionIsDown,
-            hasOtherModifiers: hasOtherModifiers,
+            hasOtherModifiers: effectiveHasOtherModifiers,
             timestamp: timestamp,
             settings: settings
         )
 
         if optionIsDown, !wasOptionDown {
             setKeyDownMonitoringActive(true)
-            if stopOnOptionPressEnabled, !hasOtherModifiers {
+            if stopOnOptionPressEnabled, !effectiveHasOtherModifiers {
                 validator.invalidateCurrentTap()
                 DispatchQueue.main.async { [weak self] in
                     self?.onStopRequested?()
@@ -302,6 +325,61 @@ final class OptionTapRecognizer: @unchecked Sendable {
         }
         return DispatchQueue.main.sync { [self] in
             self.settingsProvider()
+        }
+    }
+
+    private func currentOptionKeyMode() -> OptionKeyMode {
+        if Thread.isMainThread {
+            return optionKeyModeProvider()
+        }
+        return DispatchQueue.main.sync { [self] in
+            self.optionKeyModeProvider()
+        }
+    }
+
+    private func updateOptionSideState(flagsContainOption: Bool, keyCode: UInt16) {
+        switch keyCode {
+        case UInt16(kVK_Option):
+            if rightOptionDown {
+                leftOptionDown.toggle()
+            } else {
+                leftOptionDown = flagsContainOption
+            }
+        case UInt16(kVK_RightOption):
+            if leftOptionDown {
+                rightOptionDown.toggle()
+            } else {
+                rightOptionDown = flagsContainOption
+            }
+        default:
+            break
+        }
+
+        if !flagsContainOption {
+            leftOptionDown = false
+            rightOptionDown = false
+        }
+    }
+
+    private func optionIsDown(for mode: OptionKeyMode) -> Bool {
+        switch mode {
+        case .any:
+            return leftOptionDown || rightOptionDown
+        case .left:
+            return leftOptionDown
+        case .right:
+            return rightOptionDown
+        }
+    }
+
+    private func hasUnselectedOptionDown(for mode: OptionKeyMode) -> Bool {
+        switch mode {
+        case .any:
+            return false
+        case .left:
+            return rightOptionDown
+        case .right:
+            return leftOptionDown
         }
     }
 

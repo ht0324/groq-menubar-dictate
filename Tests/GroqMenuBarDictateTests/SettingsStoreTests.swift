@@ -55,4 +55,18 @@ final class SettingsStoreTests: XCTestCase {
         store.microphoneInputMode = .automatic
         XCTAssertEqual(store.microphoneInputMode, .automatic)
     }
+
+    func testOptionKeyModeDefaultsToAny() {
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertEqual(store.optionKeyMode, .any)
+    }
+
+    func testOptionKeyModePersistsSelectedValue() {
+        let store = SettingsStore(defaults: defaults)
+        store.optionKeyMode = .right
+        XCTAssertEqual(store.optionKeyMode, .right)
+
+        store.optionKeyMode = .left
+        XCTAssertEqual(store.optionKeyMode, .left)
+    }
 }
