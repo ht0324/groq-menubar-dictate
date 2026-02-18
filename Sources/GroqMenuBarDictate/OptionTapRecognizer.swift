@@ -6,9 +6,12 @@ import Foundation
 final class OptionTapRecognizer: @unchecked Sendable {
     typealias SettingsProvider = () -> OptionTapSettings
     typealias OptionKeyModeProvider = () -> OptionKeyMode
+    typealias OptionKeyStateProvider = (CGKeyCode) -> Bool
 
     private let settingsProvider: SettingsProvider
     private let optionKeyModeProvider: OptionKeyModeProvider
+    private let optionKeyStateProvider: OptionKeyStateProvider
+    private let eventMonitoringEnabled: Bool
     private let disallowedModifiers: NSEvent.ModifierFlags = [.command, .control, .shift, .capsLock, .function]
     private var validator = OptionTapValidator()
     private var leftOptionDown = false
@@ -22,6 +25,7 @@ final class OptionTapRecognizer: @unchecked Sendable {
     private var escapeEventTapRunLoopSource: CFRunLoopSource?
     private let stateQueue = DispatchQueue(label: "com.huntae.groq-menubar-dictate.option-tap-recognizer.state")
     private let eventQueue = DispatchQueue(label: "com.huntae.groq-menubar-dictate.option-tap-recognizer.events")
+    private let eventQueueSpecificKey = DispatchSpecificKey<Void>()
     private var escapeInterceptionEnabled = false
     private var stopOnOptionPressEnabled = false
     private var keyDownMonitoringActive = false
@@ -32,10 +36,17 @@ final class OptionTapRecognizer: @unchecked Sendable {
 
     init(
         settingsProvider: @escaping SettingsProvider,
-        optionKeyModeProvider: @escaping OptionKeyModeProvider
+        optionKeyModeProvider: @escaping OptionKeyModeProvider,
+        optionKeyStateProvider: @escaping OptionKeyStateProvider = { keyCode in
+            CGEventSource.keyState(.combinedSessionState, key: keyCode)
+        },
+        eventMonitoringEnabled: Bool = true
     ) {
         self.settingsProvider = settingsProvider
         self.optionKeyModeProvider = optionKeyModeProvider
+        self.optionKeyStateProvider = optionKeyStateProvider
+        self.eventMonitoringEnabled = eventMonitoringEnabled
+        eventQueue.setSpecific(key: eventQueueSpecificKey, value: ())
     }
 
     deinit {
@@ -55,10 +66,12 @@ final class OptionTapRecognizer: @unchecked Sendable {
         else {
             return
         }
-        installFlagsMonitorsIfNeeded()
-        removeKeyDownMonitorsIfNeeded()
+        if eventMonitoringEnabled {
+            installFlagsMonitorsIfNeeded()
+            removeKeyDownMonitorsIfNeeded()
+        }
 
-        eventQueue.async { [weak self] in
+        runOnEventQueueSync { [weak self] in
             guard let self else {
                 return
             }
@@ -77,13 +90,15 @@ final class OptionTapRecognizer: @unchecked Sendable {
             }
             return
         }
-        removeFlagsMonitorsIfNeeded()
-        removeKeyDownMonitorsIfNeeded()
-        removeEscapeEventTap()
+        if eventMonitoringEnabled {
+            removeFlagsMonitorsIfNeeded()
+            removeKeyDownMonitorsIfNeeded()
+            removeEscapeEventTap()
+        }
         stateQueue.sync {
             escapeInterceptionEnabled = false
         }
-        eventQueue.async { [weak self] in
+        runOnEventQueueSync { [weak self] in
             guard let self else {
                 return
             }
@@ -98,6 +113,9 @@ final class OptionTapRecognizer: @unchecked Sendable {
     func setEscapeInterceptionEnabled(_ enabled: Bool) {
         stateQueue.sync {
             escapeInterceptionEnabled = enabled
+        }
+        guard eventMonitoringEnabled else {
+            return
         }
         if Thread.isMainThread {
             if enabled {
@@ -120,7 +138,7 @@ final class OptionTapRecognizer: @unchecked Sendable {
     }
 
     func setStopOnOptionPressEnabled(_ enabled: Bool) {
-        eventQueue.async { [weak self] in
+        runOnEventQueueSync { [weak self] in
             self?.stopOnOptionPressEnabled = enabled
         }
     }
@@ -338,27 +356,47 @@ final class OptionTapRecognizer: @unchecked Sendable {
     }
 
     private func updateOptionSideState(flagsContainOption: Bool, keyCode: UInt16) {
-        switch keyCode {
-        case UInt16(kVK_Option):
-            if rightOptionDown {
-                leftOptionDown.toggle()
-            } else {
-                leftOptionDown = flagsContainOption
-            }
-        case UInt16(kVK_RightOption):
-            if leftOptionDown {
-                rightOptionDown.toggle()
-            } else {
-                rightOptionDown = flagsContainOption
-            }
-        default:
-            break
-        }
-
         if !flagsContainOption {
             leftOptionDown = false
             rightOptionDown = false
+            return
         }
+
+        let previousLeft = leftOptionDown
+        let previousRight = rightOptionDown
+        var resolvedLeft = optionKeyStateProvider(CGKeyCode(kVK_Option))
+        var resolvedRight = optionKeyStateProvider(CGKeyCode(kVK_RightOption))
+
+        // If CoreGraphics momentarily reports no side while Option is set,
+        // use the event side as a fallback hint.
+        if !resolvedLeft, !resolvedRight {
+            switch keyCode {
+            case UInt16(kVK_Option):
+                resolvedLeft = true
+            case UInt16(kVK_RightOption):
+                resolvedRight = true
+            default:
+                break
+            }
+        }
+
+        // If we still cannot resolve a side, keep the previous state as a
+        // conservative fallback until the next event arrives.
+        if !resolvedLeft, !resolvedRight {
+            resolvedLeft = previousLeft
+            resolvedRight = previousRight
+        }
+
+        leftOptionDown = resolvedLeft
+        rightOptionDown = resolvedRight
+    }
+
+    private func runOnEventQueueSync(_ work: () -> Void) {
+        if DispatchQueue.getSpecific(key: eventQueueSpecificKey) != nil {
+            work()
+            return
+        }
+        eventQueue.sync(execute: work)
     }
 
     private func optionIsDown(for mode: OptionKeyMode) -> Bool {
@@ -388,6 +426,9 @@ final class OptionTapRecognizer: @unchecked Sendable {
             return
         }
         keyDownMonitoringActive = enabled
+        guard eventMonitoringEnabled else {
+            return
+        }
         if Thread.isMainThread {
             if enabled {
                 self.installKeyDownMonitorsIfNeeded()
@@ -405,3 +446,29 @@ final class OptionTapRecognizer: @unchecked Sendable {
         }
     }
 }
+
+#if DEBUG
+extension OptionTapRecognizer {
+    func processFlagsChangeForTesting(
+        flagsContainOption: Bool,
+        keyCode: UInt16,
+        hasOtherModifiers: Bool,
+        timestamp: TimeInterval
+    ) {
+        processFlagsChange(
+            flagsContainOption: flagsContainOption,
+            keyCode: keyCode,
+            hasOtherModifiers: hasOtherModifiers,
+            timestamp: timestamp
+        )
+    }
+
+    func processKeyDownForTesting() {
+        processKeyDown()
+    }
+
+    func optionSideStateForTesting() -> (left: Bool, right: Bool) {
+        (leftOptionDown, rightOptionDown)
+    }
+}
+#endif

@@ -9,6 +9,10 @@ Bare-bones by design: tap Option, speak, and get text. It just works.
   - Tap Option once -> start recording
   - Tap Option again -> stop, transcribe, copy, auto-paste
   - Press Escape while recording -> abort recording (discard, no transcription, Esc is consumed)
+- Option trigger key can be configured in Settings:
+  - `Any Option key`
+  - `Left Option key only`
+  - `Right Option key only`
 - Custom words are appended to the Groq prompt for better spelling.
 - Filter words remove case-insensitive chunks:
   - `word `, `word, `, `word. `, `word.`
@@ -35,6 +39,8 @@ Bare-bones by design: tap Option, speak, and get text. It just works.
 - Latency-focused flow:
   - Stop recording on Option key-down while recording
   - In-memory multipart upload prep (no extra temp upload file)
+- Option key trigger mode:
+  - `Any` / `Left` / `Right`
 - Custom words prompt loaded from:
   - `~/Library/Application Support/groq-menubar-dictate/custom-words.txt`
 - Filter words loaded from:
@@ -115,6 +121,7 @@ If auto-paste or Escape abort is unavailable, grant Input Monitoring / Post Keyb
 - Startup behavior is configurable in `Open Settings` via `Launch at login`.
 - End-prune behavior is configurable in `Open Settings` via `Prune transcript ending phrases`.
 - Microphone mode is configurable in `Open Settings` via `Microphone input`.
+- Option key trigger mode is configurable in `Open Settings` via `Option key`.
 - In built-in mic mode, the app temporarily sets macOS default input to the internal microphone during recording and restores the previous input when recording stops.
 - If auto-paste permission is missing, transcript is still copied to clipboard.
 - App is single-instance protected. Launching it again will not create another active instance.
