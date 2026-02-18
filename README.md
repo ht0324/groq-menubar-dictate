@@ -39,6 +39,7 @@ Bare-bones by design: tap Option, speak, and get text. It just works.
 - Latency-focused flow:
   - Stop recording on Option key-down while recording
   - In-memory multipart upload prep (no extra temp upload file)
+  - Startup cleanup removes stale `dictation-*.m4a` temp files older than 24 hours
 - Option key trigger mode:
   - `Any` / `Left` / `Right`
 - Custom words prompt loaded from:
@@ -123,5 +124,6 @@ If auto-paste or Escape abort is unavailable, grant Input Monitoring / Post Keyb
 - Microphone mode is configurable in `Open Settings` via `Microphone input`.
 - Option key trigger mode is configurable in `Open Settings` via `Option key`.
 - In built-in mic mode, the app temporarily sets macOS default input to the internal microphone during recording and restores the previous input when recording stops.
+- On startup, stale temp recordings (`dictation-*.m4a`) older than 24 hours are pruned from the system temp directory.
 - If auto-paste permission is missing, transcript is still copied to clipboard.
 - App is single-instance protected. Launching it again will not create another active instance.

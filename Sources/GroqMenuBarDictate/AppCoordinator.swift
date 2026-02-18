@@ -21,6 +21,7 @@ final class AppCoordinator: NSObject {
     private let transcriber = GroqTranscriptionService()
     private let clipboard = ClipboardAndPasteService()
     private let sounds = SoundCuePlayer()
+    private let tempAudioCleanup = TempAudioCleanupService()
     private let logger = Logger(subsystem: "com.huntae.groq-menubar-dictate", category: "workflow")
 
     private lazy var optionTapRecognizer = OptionTapRecognizer(
@@ -75,6 +76,13 @@ final class AppCoordinator: NSObject {
     }
 
     func start() {
+        let cleanupReport = tempAudioCleanup.cleanupStaleFiles()
+        if cleanupReport.removedCount > 0 || cleanupReport.failedCount > 0 {
+            logger.info(
+                "Temp audio cleanup scanned=\(cleanupReport.scannedCount, privacy: .public) removed=\(cleanupReport.removedCount, privacy: .public) failed=\(cleanupReport.failedCount, privacy: .public)"
+            )
+        }
+
         do {
             try customWords.ensureSeedFileExists()
             try filterWords.ensureFileExists()
