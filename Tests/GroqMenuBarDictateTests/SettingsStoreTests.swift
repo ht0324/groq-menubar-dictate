@@ -41,4 +41,18 @@ final class SettingsStoreTests: XCTestCase {
         store.performanceDiagnosticsEnabled = false
         XCTAssertFalse(store.performanceDiagnosticsEnabled)
     }
+
+    func testMicrophoneInputModeDefaultsToAutomatic() {
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertEqual(store.microphoneInputMode, .automatic)
+    }
+
+    func testMicrophoneInputModePersistsSelectedValue() {
+        let store = SettingsStore(defaults: defaults)
+        store.microphoneInputMode = .macBookInternal
+        XCTAssertEqual(store.microphoneInputMode, .macBookInternal)
+
+        store.microphoneInputMode = .automatic
+        XCTAssertEqual(store.microphoneInputMode, .automatic)
+    }
 }

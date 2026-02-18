@@ -17,10 +17,13 @@ final class OptionTapRecognizer: @unchecked Sendable {
     private var escapeEventTap: CFMachPort?
     private var escapeEventTapRunLoopSource: CFRunLoopSource?
     private let stateQueue = DispatchQueue(label: "com.huntae.groq-menubar-dictate.option-tap-recognizer.state")
+    private let eventQueue = DispatchQueue(label: "com.huntae.groq-menubar-dictate.option-tap-recognizer.events")
     private var escapeInterceptionEnabled = false
+    private var stopOnOptionPressEnabled = false
+    private var keyDownMonitoringActive = false
 
     var onValidTap: (() -> Void)?
-    var onOptionKeyDown: (() -> Bool)?
+    var onStopRequested: (() -> Void)?
     var onEscapeKeyDown: (() -> Void)?
 
     init(settingsProvider: @escaping SettingsProvider) {
@@ -32,60 +35,131 @@ final class OptionTapRecognizer: @unchecked Sendable {
     }
 
     func start() {
-        guard globalFlagsMonitor == nil,
-              globalKeyDownMonitor == nil,
-              localFlagsMonitor == nil,
-              localKeyDownMonitor == nil
-        else {
+        if !Thread.isMainThread {
+            DispatchQueue.main.sync { [self] in
+                self.start()
+            }
             return
         }
 
-        globalFlagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.handleFlagsChanged(event)
+        guard globalFlagsMonitor == nil,
+              localFlagsMonitor == nil
+        else {
+            return
         }
-        globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handleKeyDown(event)
-        }
+        installFlagsMonitorsIfNeeded()
+        removeKeyDownMonitorsIfNeeded()
 
-        localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.handleFlagsChanged(event)
-            return event
+        eventQueue.async { [weak self] in
+            guard let self else {
+                return
+            }
+            self.validator = OptionTapValidator()
+            self.stopOnOptionPressEnabled = false
+            self.keyDownMonitoringActive = false
         }
-        localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handleKeyDown(event)
-            return event
-        }
-
-        installEscapeEventTapIfNeeded()
     }
 
     func stop() {
-        if let globalFlagsMonitor {
-            NSEvent.removeMonitor(globalFlagsMonitor)
-            self.globalFlagsMonitor = nil
+        if !Thread.isMainThread {
+            DispatchQueue.main.sync { [self] in
+                self.stop()
+            }
+            return
         }
-        if let globalKeyDownMonitor {
-            NSEvent.removeMonitor(globalKeyDownMonitor)
-            self.globalKeyDownMonitor = nil
-        }
-        if let localFlagsMonitor {
-            NSEvent.removeMonitor(localFlagsMonitor)
-            self.localFlagsMonitor = nil
-        }
-        if let localKeyDownMonitor {
-            NSEvent.removeMonitor(localKeyDownMonitor)
-            self.localKeyDownMonitor = nil
-        }
+        removeFlagsMonitorsIfNeeded()
+        removeKeyDownMonitorsIfNeeded()
         removeEscapeEventTap()
-        setEscapeInterceptionEnabled(false)
+        stateQueue.sync {
+            escapeInterceptionEnabled = false
+        }
+        eventQueue.async { [weak self] in
+            guard let self else {
+                return
+            }
+            self.validator = OptionTapValidator()
+            self.stopOnOptionPressEnabled = false
+            self.keyDownMonitoringActive = false
+        }
     }
 
     func setEscapeInterceptionEnabled(_ enabled: Bool) {
         stateQueue.sync {
             escapeInterceptionEnabled = enabled
         }
-        if enabled {
-            installEscapeEventTapIfNeeded()
+        if Thread.isMainThread {
+            if enabled {
+                self.installEscapeEventTapIfNeeded()
+            } else {
+                self.removeEscapeEventTap()
+            }
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else {
+                    return
+                }
+                if enabled {
+                    self.installEscapeEventTapIfNeeded()
+                } else {
+                    self.removeEscapeEventTap()
+                }
+            }
+        }
+    }
+
+    func setStopOnOptionPressEnabled(_ enabled: Bool) {
+        eventQueue.async { [weak self] in
+            self?.stopOnOptionPressEnabled = enabled
+        }
+    }
+
+    private func installFlagsMonitorsIfNeeded() {
+        if globalFlagsMonitor == nil {
+            globalFlagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+                self?.handleFlagsChanged(event)
+            }
+        }
+        if localFlagsMonitor == nil {
+            localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+                self?.handleFlagsChanged(event)
+                return event
+            }
+        }
+    }
+
+    private func removeFlagsMonitorsIfNeeded() {
+        if let globalFlagsMonitor {
+            NSEvent.removeMonitor(globalFlagsMonitor)
+            self.globalFlagsMonitor = nil
+        }
+        if let localFlagsMonitor {
+            NSEvent.removeMonitor(localFlagsMonitor)
+            self.localFlagsMonitor = nil
+        }
+    }
+
+    private func installKeyDownMonitorsIfNeeded() {
+        if globalKeyDownMonitor == nil {
+            globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                self?.handleKeyDown(event)
+            }
+        }
+        if localKeyDownMonitor == nil {
+            localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                self?.handleKeyDown(event)
+                return event
+            }
+        }
+    }
+
+    private func removeKeyDownMonitorsIfNeeded() {
+        if let globalKeyDownMonitor {
+            NSEvent.removeMonitor(globalKeyDownMonitor)
+            self.globalKeyDownMonitor = nil
+        }
+        if let localKeyDownMonitor {
+            NSEvent.removeMonitor(localKeyDownMonitor)
+            self.localKeyDownMonitor = nil
         }
     }
 
@@ -94,30 +168,19 @@ final class OptionTapRecognizer: @unchecked Sendable {
         let optionIsDown = flags.contains(.option)
         let hasOtherModifiers = !flags.intersection(disallowedModifiers).isEmpty
         let timestamp = event.timestamp
-        if Thread.isMainThread {
-            processFlagsChange(
+        eventQueue.async { [weak self] in
+            self?.processFlagsChange(
                 optionIsDown: optionIsDown,
                 hasOtherModifiers: hasOtherModifiers,
                 timestamp: timestamp
             )
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                self?.processFlagsChange(
-                    optionIsDown: optionIsDown,
-                    hasOtherModifiers: hasOtherModifiers,
-                    timestamp: timestamp
-                )
-            }
         }
     }
 
     private func handleKeyDown(_ event: NSEvent) {
-        if Thread.isMainThread {
-            processKeyDown()
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                self?.processKeyDown()
-            }
+        _ = event
+        eventQueue.async { [weak self] in
+            self?.processKeyDown()
         }
     }
 
@@ -202,23 +265,65 @@ final class OptionTapRecognizer: @unchecked Sendable {
 
     private func processFlagsChange(optionIsDown: Bool, hasOtherModifiers: Bool, timestamp: TimeInterval) {
         let wasOptionDown = validator.optionIsDown
+        let settings = currentTapSettings()
         let isValidTap = validator.registerFlagsChange(
             optionIsDown: optionIsDown,
             hasOtherModifiers: hasOtherModifiers,
             timestamp: timestamp,
-            settings: settingsProvider()
+            settings: settings
         )
 
-        if optionIsDown, !wasOptionDown, !hasOtherModifiers, onOptionKeyDown?() == true {
-            validator.invalidateCurrentTap()
+        if optionIsDown, !wasOptionDown {
+            setKeyDownMonitoringActive(true)
+            if stopOnOptionPressEnabled, !hasOtherModifiers {
+                validator.invalidateCurrentTap()
+                DispatchQueue.main.async { [weak self] in
+                    self?.onStopRequested?()
+                }
+            }
+        } else if !optionIsDown, wasOptionDown {
+            setKeyDownMonitoringActive(false)
         }
 
         if isValidTap {
-            onValidTap?()
+            DispatchQueue.main.async { [weak self] in
+                self?.onValidTap?()
+            }
         }
     }
 
     private func processKeyDown() {
         validator.registerNonModifierKeyDown()
+    }
+
+    private func currentTapSettings() -> OptionTapSettings {
+        if Thread.isMainThread {
+            return settingsProvider()
+        }
+        return DispatchQueue.main.sync { [self] in
+            self.settingsProvider()
+        }
+    }
+
+    private func setKeyDownMonitoringActive(_ enabled: Bool) {
+        guard keyDownMonitoringActive != enabled else {
+            return
+        }
+        keyDownMonitoringActive = enabled
+        if Thread.isMainThread {
+            if enabled {
+                self.installKeyDownMonitorsIfNeeded()
+            } else {
+                self.removeKeyDownMonitorsIfNeeded()
+            }
+        } else {
+            DispatchQueue.main.sync { [self] in
+                if enabled {
+                    self.installKeyDownMonitorsIfNeeded()
+                } else {
+                    self.removeKeyDownMonitorsIfNeeded()
+                }
+            }
+        }
     }
 }

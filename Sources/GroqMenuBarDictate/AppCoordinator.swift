@@ -61,8 +61,8 @@ final class AppCoordinator: NSObject {
         optionTapRecognizer.onValidTap = { [weak self] in
             self?.handleOptionTap()
         }
-        optionTapRecognizer.onOptionKeyDown = { [weak self] in
-            self?.handleOptionKeyDown() ?? false
+        optionTapRecognizer.onStopRequested = { [weak self] in
+            self?.handleStopRequest()
         }
         optionTapRecognizer.onEscapeKeyDown = { [weak self] in
             self?.handleEscapeKey()
@@ -162,14 +162,13 @@ final class AppCoordinator: NSObject {
         }
     }
 
-    private func handleOptionKeyDown() -> Bool {
+    private func handleStopRequest() {
         guard state == .recording else {
-            return false
+            return
         }
         Task { [weak self] in
             await self?.stopAndTranscribeFlow()
         }
-        return true
     }
 
     private func handleEscapeKey() {
@@ -203,7 +202,7 @@ final class AppCoordinator: NSObject {
         }
 
         do {
-            try recorder.startRecording()
+            try recorder.startRecording(mode: settings.microphoneInputMode)
             let hasListen = ensureEventPermission(.listen)
             if hasListen {
                 setState(.recording, message: "Recording... tap Option to stop (Esc aborts).")
@@ -359,6 +358,7 @@ final class AppCoordinator: NSObject {
     private func setState(_ state: State, message: String) {
         idleResetWorkItem?.cancel()
         idleResetWorkItem = nil
+        optionTapRecognizer.setStopOnOptionPressEnabled(state == .recording)
         optionTapRecognizer.setEscapeInterceptionEnabled(state == .recording)
         self.state = state
         self.statusMessage = message
@@ -444,6 +444,7 @@ final class AppCoordinator: NSObject {
             endPruneEnabled: settings.endPruneEnabled,
             performanceDiagnosticsEnabled: settings.performanceDiagnosticsEnabled,
             launchAtLoginEnabled: launchAtLoginEnabled,
+            microphoneInputMode: settings.microphoneInputMode,
             model: settings.model,
             languageHint: settings.languageHint ?? ""
         )
@@ -473,6 +474,7 @@ final class AppCoordinator: NSObject {
         settings.endPruneEnabled = snapshot.endPruneEnabled
         settings.performanceDiagnosticsEnabled = snapshot.performanceDiagnosticsEnabled
         settings.launchAtLoginEnabled = snapshot.launchAtLoginEnabled
+        settings.microphoneInputMode = snapshot.microphoneInputMode
         settings.apiKey = snapshot.apiKey
         settings.model = snapshot.model
         settings.languageHint = snapshot.languageHint

@@ -7,6 +7,20 @@ enum AppConfig {
     static let appSupportFolderName = "groq-menubar-dictate"
 }
 
+enum MicrophoneInputMode: String, CaseIterable {
+    case automatic
+    case macBookInternal
+
+    var title: String {
+        switch self {
+        case .automatic:
+            return "Automatic (system default)"
+        case .macBookInternal:
+            return "Always use this Mac's built-in microphone"
+        }
+    }
+}
+
 final class SettingsStore {
     private enum Key {
         static let apiKey = "settings.apiKey"
@@ -14,6 +28,7 @@ final class SettingsStore {
         static let endPruneEnabled = "settings.endPruneEnabled"
         static let performanceDiagnosticsEnabled = "settings.performanceDiagnosticsEnabled"
         static let launchAtLoginEnabled = "settings.launchAtLoginEnabled"
+        static let microphoneInputMode = "settings.microphoneInputMode"
         static let model = "settings.model"
         static let languageHint = "settings.languageHint"
         static let tapMinMs = "settings.tap.minMs"
@@ -83,6 +98,20 @@ final class SettingsStore {
         }
         set {
             defaults.set(newValue, forKey: Key.launchAtLoginEnabled)
+        }
+    }
+
+    var microphoneInputMode: MicrophoneInputMode {
+        get {
+            guard let raw = defaults.string(forKey: Key.microphoneInputMode),
+                  let mode = MicrophoneInputMode(rawValue: raw)
+            else {
+                return .automatic
+            }
+            return mode
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Key.microphoneInputMode)
         }
     }
 

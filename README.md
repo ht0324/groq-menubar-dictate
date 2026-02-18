@@ -28,6 +28,9 @@ Bare-bones by design: tap Option, speak, and get text. It just works.
 
 - Native AppKit menu bar app (`NSStatusBar`, accessory app)
 - Audio capture (`AVAudioRecorder`) to temporary `.m4a`
+- Microphone input mode:
+  - `Automatic (system default)`
+  - `Always use this Mac's built-in microphone`
 - Groq API transcription (`/openai/v1/audio/transcriptions`)
 - Latency-focused flow:
   - Stop recording on Option key-down while recording
@@ -83,5 +86,7 @@ If auto-paste or Escape abort is unavailable, grant Input Monitoring / Post Keyb
 - API key is configured in `Open Settings`.
 - Startup behavior is configurable in `Open Settings` via `Launch at login`.
 - End-prune behavior is configurable in `Open Settings` via `Prune transcript ending phrases`.
+- Microphone mode is configurable in `Open Settings` via `Microphone input`.
+- In built-in mic mode, the app temporarily sets macOS default input to the internal microphone during recording and restores the previous input when recording stops.
 - If auto-paste permission is missing, transcript is still copied to clipboard.
 - App is single-instance protected. Launching it again will not create another active instance.

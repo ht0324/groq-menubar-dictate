@@ -7,6 +7,7 @@ struct SettingsSnapshot {
     var endPruneEnabled: Bool
     var performanceDiagnosticsEnabled: Bool
     var launchAtLoginEnabled: Bool
+    var microphoneInputMode: MicrophoneInputMode
     var model: String
     var languageHint: String
 }
@@ -58,6 +59,7 @@ final class SettingsWindowController: NSWindowController {
     private let apiKeyField = NSSecureTextField()
     private let modelField = NSTextField()
     private let languageField = NSTextField()
+    private let microphoneInputModePopup = NSPopUpButton()
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
     private let autoPasteCheckbox = NSButton(checkboxWithTitle: "Auto-paste after copy", target: nil, action: nil)
     private let endPruneCheckbox = NSButton(checkboxWithTitle: "Prune transcript ending phrases", target: nil, action: nil)
@@ -76,7 +78,7 @@ final class SettingsWindowController: NSWindowController {
         self.onTestPermissions = onTestPermissions
 
         let window = SettingsWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 430),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 470),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -99,6 +101,16 @@ final class SettingsWindowController: NSWindowController {
         apiKeyField.stringValue = snapshot.apiKey
         modelField.stringValue = snapshot.model
         languageField.stringValue = snapshot.languageHint
+        microphoneInputModePopup.removeAllItems()
+        for mode in MicrophoneInputMode.allCases {
+            microphoneInputModePopup.addItem(withTitle: mode.title)
+            microphoneInputModePopup.lastItem?.representedObject = mode.rawValue
+        }
+        if let matchingItem = microphoneInputModePopup.itemArray.first(where: {
+            ($0.representedObject as? String) == snapshot.microphoneInputMode.rawValue
+        }) {
+            microphoneInputModePopup.select(matchingItem)
+        }
         launchAtLoginCheckbox.state = snapshot.launchAtLoginEnabled ? .on : .off
         autoPasteCheckbox.state = snapshot.autoPasteEnabled ? .on : .off
         endPruneCheckbox.state = snapshot.endPruneEnabled ? .on : .off
@@ -120,6 +132,7 @@ final class SettingsWindowController: NSWindowController {
         stack.addArrangedSubview(makeLabeledRow(label: "Groq API key", control: apiKeyField))
         stack.addArrangedSubview(makeLabeledRow(label: "Model", control: modelField))
         stack.addArrangedSubview(makeLabeledRow(label: "Language hint (optional)", control: languageField))
+        stack.addArrangedSubview(makeLabeledRow(label: "Microphone input", control: microphoneInputModePopup))
         stack.addArrangedSubview(launchAtLoginCheckbox)
         stack.addArrangedSubview(autoPasteCheckbox)
         stack.addArrangedSubview(endPruneCheckbox)
@@ -187,12 +200,18 @@ final class SettingsWindowController: NSWindowController {
     }
 
     @objc private func saveTapped() {
+        let selectedInputMode = microphoneInputModePopup.selectedItem?
+            .representedObject
+            .flatMap { $0 as? String }
+            .flatMap(MicrophoneInputMode.init(rawValue:)) ?? .automatic
+
         let snapshot = SettingsSnapshot(
             apiKey: apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
             autoPasteEnabled: autoPasteCheckbox.state == .on,
             endPruneEnabled: endPruneCheckbox.state == .on,
             performanceDiagnosticsEnabled: diagnosticsCheckbox.state == .on,
             launchAtLoginEnabled: launchAtLoginCheckbox.state == .on,
+            microphoneInputMode: selectedInputMode,
             model: modelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
             languageHint: languageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         )
