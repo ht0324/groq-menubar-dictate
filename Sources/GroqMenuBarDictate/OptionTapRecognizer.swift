@@ -4,6 +4,11 @@ import Carbon.HIToolbox
 import Foundation
 
 final class OptionTapRecognizer: @unchecked Sendable {
+    private enum OptionSide {
+        case left
+        case right
+    }
+
     typealias SettingsProvider = () -> OptionTapSettings
     typealias OptionKeyModeProvider = () -> OptionKeyMode
     typealias OptionKeyStateProvider = (CGKeyCode) -> Bool
@@ -364,31 +369,94 @@ final class OptionTapRecognizer: @unchecked Sendable {
 
         let previousLeft = leftOptionDown
         let previousRight = rightOptionDown
-        var resolvedLeft = optionKeyStateProvider(CGKeyCode(kVK_Option))
-        var resolvedRight = optionKeyStateProvider(CGKeyCode(kVK_RightOption))
+        var resolvedLeft = previousLeft
+        var resolvedRight = previousRight
 
-        // If CoreGraphics momentarily reports no side while Option is set,
+        let eventSide = optionSide(for: keyCode)
+        switch eventSide {
+        case .left?:
+            resolvedLeft.toggle()
+        case .right?:
+            resolvedRight.toggle()
+        case nil:
+            break
+        }
+
+        // If our event-derived state is impossible while Option is down,
         // use the event side as a fallback hint.
-        if !resolvedLeft, !resolvedRight {
-            switch keyCode {
-            case UInt16(kVK_Option):
+        if !resolvedLeft, !resolvedRight, let eventSide {
+            switch eventSide {
+            case .left:
                 resolvedLeft = true
-            case UInt16(kVK_RightOption):
+            case .right:
                 resolvedRight = true
-            default:
-                break
             }
         }
 
-        // If we still cannot resolve a side, keep the previous state as a
-        // conservative fallback until the next event arrives.
-        if !resolvedLeft, !resolvedRight {
+        let providerLeft = optionKeyStateProvider(CGKeyCode(kVK_Option))
+        let providerRight = optionKeyStateProvider(CGKeyCode(kVK_RightOption))
+        if let providerSide = activeSide(left: providerLeft, right: providerRight) {
+            let shouldAdoptProviderState: Bool
+            if let eventSide {
+                if providerSide == eventSide {
+                    shouldAdoptProviderState = true
+                } else {
+                    // If the provider side was already down, this may be a missed
+                    // release event for the event side; allow provider to reconcile.
+                    shouldAdoptProviderState = isOptionSideDown(
+                        providerSide,
+                        leftDown: previousLeft,
+                        rightDown: previousRight
+                    )
+                }
+            } else {
+                shouldAdoptProviderState = true
+            }
+
+            if shouldAdoptProviderState {
+                resolvedLeft = providerLeft
+                resolvedRight = providerRight
+            }
+        } else if !providerLeft, !providerRight, !resolvedLeft, !resolvedRight {
+            // Keep previous state as a conservative fallback when both event and
+            // provider state are inconclusive.
             resolvedLeft = previousLeft
             resolvedRight = previousRight
         }
 
         leftOptionDown = resolvedLeft
         rightOptionDown = resolvedRight
+    }
+
+    private func optionSide(for keyCode: UInt16) -> OptionSide? {
+        switch keyCode {
+        case UInt16(kVK_Option):
+            return .left
+        case UInt16(kVK_RightOption):
+            return .right
+        default:
+            return nil
+        }
+    }
+
+    private func activeSide(left: Bool, right: Bool) -> OptionSide? {
+        switch (left, right) {
+        case (true, false):
+            return .left
+        case (false, true):
+            return .right
+        default:
+            return nil
+        }
+    }
+
+    private func isOptionSideDown(_ side: OptionSide, leftDown: Bool, rightDown: Bool) -> Bool {
+        switch side {
+        case .left:
+            return leftDown
+        case .right:
+            return rightDown
+        }
     }
 
     private func runOnEventQueueSync(_ work: () -> Void) {

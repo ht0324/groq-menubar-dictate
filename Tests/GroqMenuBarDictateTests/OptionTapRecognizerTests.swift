@@ -198,6 +198,55 @@ final class OptionTapRecognizerTests: XCTestCase {
         XCTAssertFalse(sideState.right)
     }
 
+    func testRightModeIgnoresLeftTapWhenProviderMisreportsAnyOptionAsRight() {
+        let keyState = RightBiasedOptionKeyStateProvider()
+        let recognizer = OptionTapRecognizer(
+            settingsProvider: { [settings] in settings },
+            optionKeyModeProvider: { .right },
+            optionKeyStateProvider: keyState.value(for:),
+            eventMonitoringEnabled: false
+        )
+
+        var validTapCount = 0
+        recognizer.onValidTap = {
+            validTapCount += 1
+        }
+
+        keyState.optionIsDown = true
+        recognizer.processFlagsChangeForTesting(
+            flagsContainOption: true,
+            keyCode: UInt16(kVK_Option),
+            hasOtherModifiers: false,
+            timestamp: 60.0
+        )
+        keyState.optionIsDown = false
+        recognizer.processFlagsChangeForTesting(
+            flagsContainOption: false,
+            keyCode: UInt16(kVK_Option),
+            hasOtherModifiers: false,
+            timestamp: 60.12
+        )
+        flushMainQueue()
+        XCTAssertEqual(validTapCount, 0)
+
+        keyState.optionIsDown = true
+        recognizer.processFlagsChangeForTesting(
+            flagsContainOption: true,
+            keyCode: UInt16(kVK_RightOption),
+            hasOtherModifiers: false,
+            timestamp: 61.0
+        )
+        keyState.optionIsDown = false
+        recognizer.processFlagsChangeForTesting(
+            flagsContainOption: false,
+            keyCode: UInt16(kVK_RightOption),
+            hasOtherModifiers: false,
+            timestamp: 61.12
+        )
+        flushMainQueue()
+        XCTAssertEqual(validTapCount, 1)
+    }
+
     private func makeRecognizer(mode: OptionKeyMode, keyState: StubOptionKeyStateProvider) -> OptionTapRecognizer {
         OptionTapRecognizer(
             settingsProvider: { [settings] in settings },
@@ -226,6 +275,24 @@ private final class StubOptionKeyStateProvider {
             return leftDown
         case CGKeyCode(kVK_RightOption):
             return rightDown
+        default:
+            return false
+        }
+    }
+}
+
+private final class RightBiasedOptionKeyStateProvider {
+    var optionIsDown = false
+
+    func value(for keyCode: CGKeyCode) -> Bool {
+        guard optionIsDown else {
+            return false
+        }
+        switch keyCode {
+        case CGKeyCode(kVK_Option):
+            return false
+        case CGKeyCode(kVK_RightOption):
+            return true
         default:
             return false
         }
