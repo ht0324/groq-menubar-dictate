@@ -89,6 +89,7 @@ final class AppCoordinator: NSObject {
             try endPrunePhrases.ensureFileExists()
         } catch {
             setError("Failed to prepare word files: \(error.localizedDescription)")
+            return
         }
 
         optionTapRecognizer.start()
@@ -264,7 +265,6 @@ final class AppCoordinator: NSObject {
         let endPruneEnabled = settings.endPruneEnabled
         let promptWords = customWords.loadWords(limit: 80)
         let prompt = CustomWordsStore.transcriptionPrompt(from: promptWords)
-        let filterWordsList = filterWords.loadWords()
         let endPrunePhraseList = endPruneEnabled ? endPrunePhrases.loadPhrases() : EndPrunePhrasesStore.defaultPhrases
         timing.promptPreparationMilliseconds = millisecondsSince(prepStart)
 
@@ -297,7 +297,6 @@ final class AppCoordinator: NSObject {
             let postProcessingStart = DispatchTime.now()
             let filtered = filterWords.applyFilters(
                 to: response.transcript.text,
-                words: filterWordsList,
                 endPruneEnabled: endPruneEnabled,
                 endPrunePhrases: endPrunePhraseList
             )

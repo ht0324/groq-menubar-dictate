@@ -105,20 +105,15 @@ final class FilterWordsStore {
     }
 
     static func applyWordFilters(to text: String, words: [String]) -> String {
-        var output = text
-        for word in words {
-            let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
-                continue
-            }
-            output = output.replacingOccurrences(
-                of: removalPattern(for: trimmed),
-                with: "",
-                options: [.caseInsensitive, .regularExpression],
-                range: nil
-            )
+        guard let pattern = removalPattern(for: words) else {
+            return text
         }
-        return output
+        return text.replacingOccurrences(
+            of: pattern,
+            with: "",
+            options: [.caseInsensitive, .regularExpression],
+            range: nil
+        )
     }
 
     static func applyEndingPruneRules(
@@ -150,9 +145,25 @@ final class FilterWordsStore {
         }
     }
 
-    private static func removalPattern(for word: String) -> String {
-        let escapedWord = NSRegularExpression.escapedPattern(for: word)
-        return #"(?<![\p{L}\p{N}_])\#(escapedWord)(?:,[\t ]+|\.[\t ]+|\.|[\t ]+)"#
+    private static func removalPattern(for words: [String]) -> String? {
+        let normalizedWords = words
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted {
+                if $0.count == $1.count {
+                    return $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+                }
+                return $0.count > $1.count
+            }
+
+        guard !normalizedWords.isEmpty else {
+            return nil
+        }
+
+        let alternation = normalizedWords
+            .map(NSRegularExpression.escapedPattern(for:))
+            .joined(separator: "|")
+        return #"(?<![\p{L}\p{N}_])(?:\#(alternation))(?:,[\t ]+|\.[\t ]+|\.|[\t ]+)"#
     }
 
     private static func trimTrailingWhitespace(_ text: String) -> String {

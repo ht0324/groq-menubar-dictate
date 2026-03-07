@@ -29,6 +29,14 @@ final class FilterWordsStoreTests: XCTestCase {
         XCTAssertEqual(output, "museum done")
     }
 
+    func testApplyWordFiltersPrefersLongerPhrasesWhenWordsOverlap() {
+        let output = FilterWordsStore.applyWordFilters(
+            to: "uh huh okay uh done",
+            words: ["uh", "uh huh"]
+        )
+        XCTAssertEqual(output, "okay done")
+    }
+
     func testLoadWordsReloadsWhenFileModificationDateChanges() throws {
         let fileManager = FileManager.default
         let tempFolder = fileManager.temporaryDirectory
