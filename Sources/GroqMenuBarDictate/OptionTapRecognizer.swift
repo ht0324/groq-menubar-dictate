@@ -75,6 +75,10 @@ final class OptionTapRecognizer: @unchecked Sendable {
             installFlagsMonitorsIfNeeded()
             removeKeyDownMonitorsIfNeeded()
         }
+        stateQueue.sync {
+            escapeInterceptionEnabled = false
+            stopOnOptionPressEnabled = false
+        }
 
         runOnEventQueueSync { [weak self] in
             guard let self else {
@@ -83,7 +87,6 @@ final class OptionTapRecognizer: @unchecked Sendable {
             self.validator = OptionTapValidator()
             self.leftOptionDown = false
             self.rightOptionDown = false
-            self.stopOnOptionPressEnabled = false
             self.keyDownMonitoringActive = false
         }
     }
@@ -102,6 +105,7 @@ final class OptionTapRecognizer: @unchecked Sendable {
         }
         stateQueue.sync {
             escapeInterceptionEnabled = false
+            stopOnOptionPressEnabled = false
         }
         runOnEventQueueSync { [weak self] in
             guard let self else {
@@ -110,7 +114,6 @@ final class OptionTapRecognizer: @unchecked Sendable {
             self.validator = OptionTapValidator()
             self.leftOptionDown = false
             self.rightOptionDown = false
-            self.stopOnOptionPressEnabled = false
             self.keyDownMonitoringActive = false
         }
     }
@@ -143,8 +146,8 @@ final class OptionTapRecognizer: @unchecked Sendable {
     }
 
     func setStopOnOptionPressEnabled(_ enabled: Bool) {
-        runOnEventQueueSync { [weak self] in
-            self?.stopOnOptionPressEnabled = enabled
+        stateQueue.sync {
+            stopOnOptionPressEnabled = enabled
         }
     }
 
@@ -321,7 +324,7 @@ final class OptionTapRecognizer: @unchecked Sendable {
 
         if optionIsDown, !wasOptionDown {
             setKeyDownMonitoringActive(true)
-            if stopOnOptionPressEnabled, !effectiveHasOtherModifiers {
+            if shouldStopOnOptionPress(), !effectiveHasOtherModifiers {
                 validator.invalidateCurrentTap()
                 DispatchQueue.main.async { [weak self] in
                     self?.onStopRequested?()
@@ -343,21 +346,11 @@ final class OptionTapRecognizer: @unchecked Sendable {
     }
 
     private func currentTapSettings() -> OptionTapSettings {
-        if Thread.isMainThread {
-            return settingsProvider()
-        }
-        return DispatchQueue.main.sync { [self] in
-            self.settingsProvider()
-        }
+        settingsProvider()
     }
 
     private func currentOptionKeyMode() -> OptionKeyMode {
-        if Thread.isMainThread {
-            return optionKeyModeProvider()
-        }
-        return DispatchQueue.main.sync { [self] in
-            self.optionKeyModeProvider()
-        }
+        optionKeyModeProvider()
     }
 
     private func updateOptionSideState(flagsContainOption: Bool, keyCode: UInt16) {
@@ -489,6 +482,12 @@ final class OptionTapRecognizer: @unchecked Sendable {
         }
     }
 
+    private func shouldStopOnOptionPress() -> Bool {
+        stateQueue.sync {
+            stopOnOptionPressEnabled
+        }
+    }
+
     private func setKeyDownMonitoringActive(_ enabled: Bool) {
         guard keyDownMonitoringActive != enabled else {
             return
@@ -504,7 +503,7 @@ final class OptionTapRecognizer: @unchecked Sendable {
                 self.removeKeyDownMonitorsIfNeeded()
             }
         } else {
-            DispatchQueue.main.sync { [self] in
+            DispatchQueue.main.async { [self] in
                 if enabled {
                     self.installKeyDownMonitorsIfNeeded()
                 } else {

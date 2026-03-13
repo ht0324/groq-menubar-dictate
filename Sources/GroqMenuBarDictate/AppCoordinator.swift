@@ -25,11 +25,11 @@ final class AppCoordinator: NSObject {
     private let logger = Logger(subsystem: "com.huntae.groq-menubar-dictate", category: "workflow")
 
     private lazy var optionTapRecognizer = OptionTapRecognizer(
-        settingsProvider: { [weak self] in
-            self?.settings.tapSettings ?? OptionTapSettings(minTapMilliseconds: 20, maxTapMilliseconds: 450, debounceMilliseconds: 250)
+        settingsProvider: { [settings] in
+            settings.tapSettings
         },
-        optionKeyModeProvider: { [weak self] in
-            self?.settings.optionKeyMode ?? .any
+        optionKeyModeProvider: { [settings] in
+            settings.optionKeyMode
         }
     )
 

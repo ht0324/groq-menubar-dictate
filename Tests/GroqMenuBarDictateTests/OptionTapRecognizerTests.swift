@@ -247,6 +247,44 @@ final class OptionTapRecognizerTests: XCTestCase {
         XCTAssertEqual(validTapCount, 1)
     }
 
+    func testBackgroundFlagsProcessingDoesNotHopToMainForSettingsLookups() {
+        let keyState = StubOptionKeyStateProvider()
+        let settingsProviderExpectation = expectation(description: "settings provider called off main")
+        let modeProviderExpectation = expectation(description: "mode provider called off main")
+        let processingExpectation = expectation(description: "background processing completes")
+
+        let recognizer = OptionTapRecognizer(
+            settingsProvider: { [settings] in
+                XCTAssertFalse(Thread.isMainThread)
+                settingsProviderExpectation.fulfill()
+                return settings
+            },
+            optionKeyModeProvider: {
+                XCTAssertFalse(Thread.isMainThread)
+                modeProviderExpectation.fulfill()
+                return .any
+            },
+            optionKeyStateProvider: keyState.value(for:),
+            eventMonitoringEnabled: false
+        )
+
+        DispatchQueue.global().async {
+            keyState.leftDown = true
+            recognizer.processFlagsChangeForTesting(
+                flagsContainOption: true,
+                keyCode: UInt16(kVK_Option),
+                hasOtherModifiers: false,
+                timestamp: 70.0
+            )
+            processingExpectation.fulfill()
+        }
+
+        wait(
+            for: [modeProviderExpectation, settingsProviderExpectation, processingExpectation],
+            timeout: 1.0
+        )
+    }
+
     private func makeRecognizer(mode: OptionKeyMode, keyState: StubOptionKeyStateProvider) -> OptionTapRecognizer {
         OptionTapRecognizer(
             settingsProvider: { [settings] in settings },
@@ -265,7 +303,7 @@ final class OptionTapRecognizerTests: XCTestCase {
     }
 }
 
-private final class StubOptionKeyStateProvider {
+private final class StubOptionKeyStateProvider: @unchecked Sendable {
     var leftDown = false
     var rightDown = false
 
@@ -281,7 +319,7 @@ private final class StubOptionKeyStateProvider {
     }
 }
 
-private final class RightBiasedOptionKeyStateProvider {
+private final class RightBiasedOptionKeyStateProvider: @unchecked Sendable {
     var optionIsDown = false
 
     func value(for keyCode: CGKeyCode) -> Bool {
