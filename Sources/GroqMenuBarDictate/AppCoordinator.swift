@@ -20,6 +20,7 @@ final class AppCoordinator: NSObject {
     private let recorder = AudioRecorderService()
     private let transcriber = GroqTranscriptionService()
     private let clipboard = ClipboardAndPasteService()
+    private let dictationStats = DictationStatsStore()
     private let sounds = SoundCuePlayer()
     private let tempAudioCleanup = TempAudioCleanupService()
     private let logger = Logger(subsystem: "com.huntae.groq-menubar-dictate", category: "workflow")
@@ -36,6 +37,8 @@ final class AppCoordinator: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let statusMenuItem = NSMenuItem(title: "Starting...", action: nil, keyEquivalent: "")
+    private let statsMenu = NSMenu(title: "Stats")
+    private let statsMenuItem = NSMenuItem(title: "Stats", action: nil, keyEquivalent: "")
 
     private var state: State = .idle {
         didSet {
@@ -93,7 +96,7 @@ final class AppCoordinator: NSObject {
         }
 
         optionTapRecognizer.start()
-        setIdleStatus("Idle: tap Option to record.", transientSeconds: nil)
+        presentSetupGuidanceIfNeeded()
     }
 
     private func setupStatusItem() {
@@ -124,6 +127,8 @@ final class AppCoordinator: NSObject {
                 keyEquivalent: ""
             )
         )
+        statsMenuItem.submenu = statsMenu
+        menu.addItem(statsMenuItem)
         menu.addItem(
             NSMenuItem(
                 title: "Open Custom Words File",
@@ -157,6 +162,7 @@ final class AppCoordinator: NSObject {
             item.target = self
         }
         statusItem.menu = menu
+        refreshStatsMenu()
         refreshStatusLine()
         refreshStatusItemAppearance()
     }
@@ -238,10 +244,10 @@ final class AppCoordinator: NSObject {
         let flowStart = DispatchTime.now()
         var timing = WorkflowTiming()
 
-        let fileURL: URL
+        let recordedClip: RecordedClip
         let stopRecordingStart = DispatchTime.now()
         do {
-            fileURL = try recorder.stopRecording()
+            recordedClip = try recorder.stopRecording()
             timing.stopRecordingMilliseconds = millisecondsSince(stopRecordingStart)
         } catch {
             timing.result = "stop_recording_failed"
@@ -253,7 +259,7 @@ final class AppCoordinator: NSObject {
 
         setState(.transcribing, message: "Transcribing...")
         defer {
-            try? FileManager.default.removeItem(at: fileURL)
+            try? FileManager.default.removeItem(at: recordedClip.fileURL)
         }
 
         let prepStart = DispatchTime.now()
@@ -279,7 +285,7 @@ final class AppCoordinator: NSObject {
         do {
             let transcribeStart = DispatchTime.now()
             let response = try await transcriber.transcribe(
-                fileURL: fileURL,
+                fileURL: recordedClip.fileURL,
                 apiKey: apiKey,
                 model: model,
                 language: language,
@@ -329,14 +335,20 @@ final class AppCoordinator: NSObject {
                     timing.result = "pasted"
                     timing.totalMilliseconds = millisecondsSince(flowStart)
                     logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
-                    setIdleStatus("Pasted transcript (\(text.count) chars).")
+                    finalizeSuccessfulTranscriptDelivery(
+                        text: text,
+                        recordingDurationSeconds: recordedClip.durationSeconds,
+                        statusMessage: "Pasted transcript (\(text.count) chars)."
+                    )
                 } else {
                     timing.pasteMilliseconds = millisecondsSince(pasteStart)
                     timing.result = "copied_missing_post_permission"
                     timing.totalMilliseconds = millisecondsSince(flowStart)
                     logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
-                    setIdleStatus(
-                        "Copied transcript. Auto-paste needs Post Keyboard Events permission.",
+                    finalizeSuccessfulTranscriptDelivery(
+                        text: text,
+                        recordingDurationSeconds: recordedClip.durationSeconds,
+                        statusMessage: "Copied transcript. Auto-paste needs Post Keyboard Events permission.",
                         transientSeconds: 8
                     )
                 }
@@ -344,7 +356,11 @@ final class AppCoordinator: NSObject {
                 timing.result = "copied"
                 timing.totalMilliseconds = millisecondsSince(flowStart)
                 logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
-                setIdleStatus("Copied transcript (\(text.count) chars).")
+                finalizeSuccessfulTranscriptDelivery(
+                    text: text,
+                    recordingDurationSeconds: recordedClip.durationSeconds,
+                    statusMessage: "Copied transcript (\(text.count) chars)."
+                )
             }
         } catch {
             timing.result = "transcription_failed"
@@ -359,12 +375,26 @@ final class AppCoordinator: NSObject {
             return
         }
         do {
-            let fileURL = try recorder.stopRecording()
-            try? FileManager.default.removeItem(at: fileURL)
+            let recordedClip = try recorder.stopRecording()
+            try? FileManager.default.removeItem(at: recordedClip.fileURL)
             setIdleStatus("Recording aborted.")
         } catch {
             setError("Failed to abort recording: \(error.localizedDescription)")
         }
+    }
+
+    private func finalizeSuccessfulTranscriptDelivery(
+        text: String,
+        recordingDurationSeconds: TimeInterval,
+        statusMessage: String,
+        transientSeconds: TimeInterval? = 4
+    ) {
+        setIdleStatus(statusMessage, transientSeconds: transientSeconds)
+        dictationStats.recordSuccessfulSession(
+            text: text,
+            recordingDurationSeconds: recordingDurationSeconds
+        )
+        refreshStatsMenu()
     }
 
     private func setState(_ state: State, message: String) {
@@ -426,6 +456,65 @@ final class AppCoordinator: NSObject {
         statusItem.button?.toolTip = statusMessage
     }
 
+    private func refreshStatsMenu() {
+        let summary = dictationStats.snapshot.summary(
+            typingWordsPerMinute: settings.typingWordsPerMinute
+        )
+
+        statsMenu.removeAllItems()
+        statsMenu.autoenablesItems = false
+        statsMenu.addItem(disabledMenuItem(title: "Typing Speed: \(formatTypingSpeed(summary.typingWordsPerMinute))"))
+
+        if summary.snapshot.isEmpty {
+            statsMenu.addItem(disabledMenuItem(title: "No dictations yet"))
+        } else {
+            statsMenu.addItem(disabledMenuItem(title: "Sessions: \(summary.snapshot.successfulSessions.formatted())"))
+            statsMenu.addItem(disabledMenuItem(title: "Words Dictated: \(summary.snapshot.totalWords.formatted())"))
+            statsMenu.addItem(disabledMenuItem(title: "Recording Time: \(formatDuration(summary.snapshot.totalRecordingSeconds))"))
+            statsMenu.addItem(disabledMenuItem(title: "Typing Time: \(formatOptionalDuration(summary.estimatedTypingSeconds))"))
+            statsMenu.addItem(disabledMenuItem(title: "Time Saved: \(formatSignedOptionalDuration(summary.savedSeconds))"))
+        }
+
+        statsMenu.addItem(.separator())
+        let resetItem = NSMenuItem(title: "Reset Stats...", action: #selector(resetStatsFromMenu), keyEquivalent: "")
+        resetItem.target = self
+        resetItem.isEnabled = !summary.snapshot.isEmpty
+        statsMenu.addItem(resetItem)
+    }
+
+    private func disabledMenuItem(title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
+    }
+
+    private func formatTypingSpeed(_ wordsPerMinute: Int) -> String {
+        wordsPerMinute > 0 ? "\(wordsPerMinute.formatted()) WPM" : "Off"
+    }
+
+    private func formatOptionalDuration(_ seconds: TimeInterval?) -> String {
+        guard let seconds else {
+            return "--"
+        }
+        return formatDuration(seconds)
+    }
+
+    private func formatSignedOptionalDuration(_ seconds: TimeInterval?) -> String {
+        guard let seconds else {
+            return "--"
+        }
+        let sign = seconds < 0 ? "-" : ""
+        return "\(sign)\(formatDuration(abs(seconds)))"
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = seconds >= 3600 ? [.hour, .minute] : [.minute, .second]
+        formatter.unitsStyle = .abbreviated
+        formatter.zeroFormattingBehavior = [.dropLeading, .dropMiddle]
+        return formatter.string(from: max(0, seconds)) ?? "0s"
+    }
+
     private func refreshStatusItemAppearance() {
         guard let button = statusItem.button else {
             return
@@ -459,7 +548,8 @@ final class AppCoordinator: NSObject {
             microphoneInputMode: settings.microphoneInputMode,
             optionKeyMode: settings.optionKeyMode,
             model: settings.model,
-            languageHint: settings.languageHint ?? ""
+            languageHint: settings.languageHint ?? "",
+            typingWordsPerMinute: settings.typingWordsPerMinute
         )
         let controller = SettingsWindowController(
             snapshot: snapshot,
@@ -492,6 +582,8 @@ final class AppCoordinator: NSObject {
         settings.apiKey = snapshot.apiKey
         settings.model = snapshot.model
         settings.languageHint = snapshot.languageHint
+        settings.typingWordsPerMinute = snapshot.typingWordsPerMinute
+        refreshStatsMenu()
         do {
             try launchAtLogin.setEnabled(
                 snapshot.launchAtLoginEnabled,
@@ -548,11 +640,52 @@ final class AppCoordinator: NSObject {
         NSApp.terminate(nil)
     }
 
+    @objc private func resetStatsFromMenu() {
+        dictationStats.reset()
+        refreshStatsMenu()
+        setIdleStatus("Dictation stats reset.")
+    }
+
     private func resolvedExecutablePath() -> String {
         ExecutablePathResolver.resolve(arguments: CommandLine.arguments) ?? ""
     }
 
     private func ensureEventPermission(_ access: PermissionService.EventAccess) -> Bool {
         permissions.ensureEventAccess(access)
+    }
+
+    private func presentSetupGuidanceIfNeeded() {
+        let missingAPIKey = settings.apiKey.isEmpty
+        let missingListenPermission = !permissions.hasEventAccess(.listen)
+
+        guard missingAPIKey || missingListenPermission else {
+            setIdleStatus("Idle: tap Option to record.", transientSeconds: nil)
+            return
+        }
+
+        if missingAPIKey {
+            setIdleStatus("Setup required: add your Groq API key in Settings.", transientSeconds: nil)
+        } else {
+            setIdleStatus("Setup required: grant Input Monitoring via Test Permissions.", transientSeconds: nil)
+        }
+
+        let steps = [
+            "Groq MenuBar Dictate runs from the menu bar.",
+            missingAPIKey ? "Paste your Groq API key in Settings." : nil,
+            missingListenPermission ? "Click Test Permissions in Settings to grant Input Monitoring for the Option-key hotkey." : nil,
+            "Grant microphone access the first time you record."
+        ]
+            .compactMap { $0 }
+            .joined(separator: "\n")
+
+        let alert = NSAlert()
+        alert.messageText = "Finish Setup"
+        alert.informativeText = steps
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Later")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            openSettingsFromMenu()
+        }
     }
 }

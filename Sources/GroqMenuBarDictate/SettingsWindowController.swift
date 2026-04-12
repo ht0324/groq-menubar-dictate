@@ -11,6 +11,7 @@ struct SettingsSnapshot {
     var optionKeyMode: OptionKeyMode
     var model: String
     var languageHint: String
+    var typingWordsPerMinute: Int
 }
 
 private final class SettingsWindow: NSWindow {
@@ -60,6 +61,7 @@ final class SettingsWindowController: NSWindowController {
     private let apiKeyField = NSSecureTextField()
     private let modelField = NSTextField()
     private let languageField = NSTextField()
+    private let typingSpeedField = NSTextField()
     private let optionKeyModePopup = NSPopUpButton()
     private let microphoneInputModePopup = NSPopUpButton()
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
@@ -80,7 +82,7 @@ final class SettingsWindowController: NSWindowController {
         self.onTestPermissions = onTestPermissions
 
         let window = SettingsWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 500),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 560),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -103,6 +105,8 @@ final class SettingsWindowController: NSWindowController {
         apiKeyField.stringValue = snapshot.apiKey
         modelField.stringValue = snapshot.model
         languageField.stringValue = snapshot.languageHint
+        typingSpeedField.placeholderString = "Optional"
+        typingSpeedField.stringValue = snapshot.typingWordsPerMinute > 0 ? String(snapshot.typingWordsPerMinute) : ""
         optionKeyModePopup.removeAllItems()
         for mode in OptionKeyMode.allCases {
             optionKeyModePopup.addItem(withTitle: mode.title)
@@ -136,14 +140,24 @@ final class SettingsWindowController: NSWindowController {
         let title = NSTextField(labelWithString: "Option-key-only dictation (no clicking needed)")
         title.font = NSFont.boldSystemFont(ofSize: 13)
 
-        let hint = NSTextField(labelWithString: "Tap Option once to start recording, tap Option again to stop and transcribe.")
+        let hint = NSTextField(
+            wrappingLabelWithString: "Paste your Groq API key, then click Test Permissions to grant Microphone and Input Monitoring. After setup, tap Option once to start recording and again to stop."
+        )
         hint.textColor = .secondaryLabelColor
+        hint.maximumNumberOfLines = 0
 
         stack.addArrangedSubview(title)
         stack.addArrangedSubview(hint)
         stack.addArrangedSubview(makeLabeledRow(label: "Groq API key", control: apiKeyField))
         stack.addArrangedSubview(makeLabeledRow(label: "Model", control: modelField))
         stack.addArrangedSubview(makeLabeledRow(label: "Language hint (optional)", control: languageField))
+        stack.addArrangedSubview(makeLabeledRow(label: "Typing speed (WPM)", control: typingSpeedField))
+        let typingHint = NSTextField(
+            wrappingLabelWithString: "Used to estimate cumulative time saved. Leave blank or 0 to disable the saved-time stats."
+        )
+        typingHint.textColor = .secondaryLabelColor
+        typingHint.maximumNumberOfLines = 0
+        stack.addArrangedSubview(typingHint)
         stack.addArrangedSubview(makeLabeledRow(label: "Option key", control: optionKeyModePopup))
         stack.addArrangedSubview(makeLabeledRow(label: "Microphone input", control: microphoneInputModePopup))
         stack.addArrangedSubview(launchAtLoginCheckbox)
@@ -223,6 +237,11 @@ final class SettingsWindowController: NSWindowController {
             .flatMap { $0 as? String }
             .flatMap(MicrophoneInputMode.init(rawValue:)) ?? .automatic
 
+        let typingWordsPerMinute = max(
+            0,
+            Int(typingSpeedField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        )
+
         let snapshot = SettingsSnapshot(
             apiKey: apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
             autoPasteEnabled: autoPasteCheckbox.state == .on,
@@ -232,7 +251,8 @@ final class SettingsWindowController: NSWindowController {
             microphoneInputMode: selectedInputMode,
             optionKeyMode: selectedOptionKeyMode,
             model: modelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
-            languageHint: languageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            languageHint: languageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
+            typingWordsPerMinute: typingWordsPerMinute
         )
         onSave(snapshot)
         close()

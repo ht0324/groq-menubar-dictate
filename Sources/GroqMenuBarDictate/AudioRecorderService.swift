@@ -25,6 +25,11 @@ enum AudioRecorderError: LocalizedError {
     }
 }
 
+struct RecordedClip {
+    let fileURL: URL
+    let durationSeconds: TimeInterval
+}
+
 final class AudioRecorderService: NSObject {
     private var recorder: AVAudioRecorder?
     private var inputDeviceOverride: InputDeviceOverride?
@@ -78,14 +83,15 @@ final class AudioRecorderService: NSObject {
         throw AudioRecorderError.failedToStart
     }
 
-    func stopRecording() throws -> URL {
+    func stopRecording() throws -> RecordedClip {
         guard let recorder else {
             throw AudioRecorderError.notRecording
         }
+        let durationSeconds = max(0, recorder.currentTime)
         recorder.stop()
         self.recorder = nil
         restoreInputOverrideIfNeeded()
-        return recorder.url
+        return RecordedClip(fileURL: recorder.url, durationSeconds: durationSeconds)
     }
 
     private func restoreInputOverrideIfNeeded() {

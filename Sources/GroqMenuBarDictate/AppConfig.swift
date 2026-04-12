@@ -49,6 +49,7 @@ final class SettingsStore {
         static let optionKeyMode = "settings.optionKeyMode"
         static let model = "settings.model"
         static let languageHint = "settings.languageHint"
+        static let typingWordsPerMinute = "settings.typingWordsPerMinute"
         static let tapMinMs = "settings.tap.minMs"
         static let tapMaxMs = "settings.tap.maxMs"
         static let tapDebounceMs = "settings.tap.debounceMs"
@@ -170,6 +171,18 @@ final class SettingsStore {
         set {
             let trimmed = newValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             defaults.set(trimmed.isEmpty ? nil : trimmed, forKey: Key.languageHint)
+        }
+    }
+
+    var typingWordsPerMinute: Int {
+        get {
+            guard defaults.object(forKey: Key.typingWordsPerMinute) != nil else {
+                return 0
+            }
+            return max(0, defaults.integer(forKey: Key.typingWordsPerMinute))
+        }
+        set {
+            defaults.set(max(0, newValue), forKey: Key.typingWordsPerMinute)
         }
     }
 

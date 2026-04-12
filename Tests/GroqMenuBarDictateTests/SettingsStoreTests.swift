@@ -69,4 +69,18 @@ final class SettingsStoreTests: XCTestCase {
         store.optionKeyMode = .left
         XCTAssertEqual(store.optionKeyMode, .left)
     }
+
+    func testTypingWordsPerMinuteDefaultsToZeroWhenUnset() {
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertEqual(store.typingWordsPerMinute, 0)
+    }
+
+    func testTypingWordsPerMinutePersistsSelectedValue() {
+        let store = SettingsStore(defaults: defaults)
+        store.typingWordsPerMinute = 72
+        XCTAssertEqual(store.typingWordsPerMinute, 72)
+
+        store.typingWordsPerMinute = 0
+        XCTAssertEqual(store.typingWordsPerMinute, 0)
+    }
 }
