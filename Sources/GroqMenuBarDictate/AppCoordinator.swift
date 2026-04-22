@@ -96,6 +96,7 @@ final class AppCoordinator: NSObject {
         }
 
         optionTapRecognizer.start()
+        logSuspiciousStatsIfNeeded()
         presentSetupGuidanceIfNeeded()
     }
 
@@ -337,7 +338,8 @@ final class AppCoordinator: NSObject {
                     logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
                     finalizeSuccessfulTranscriptDelivery(
                         text: text,
-                        recordingDurationSeconds: recordedClip.durationSeconds,
+                        fileMeasuredDurationSeconds: recordedClip.fileMeasuredDurationSeconds,
+                        recorderReportedDurationSeconds: recordedClip.recorderReportedDurationSeconds,
                         statusMessage: "Pasted transcript (\(text.count) chars)."
                     )
                 } else {
@@ -347,7 +349,8 @@ final class AppCoordinator: NSObject {
                     logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
                     finalizeSuccessfulTranscriptDelivery(
                         text: text,
-                        recordingDurationSeconds: recordedClip.durationSeconds,
+                        fileMeasuredDurationSeconds: recordedClip.fileMeasuredDurationSeconds,
+                        recorderReportedDurationSeconds: recordedClip.recorderReportedDurationSeconds,
                         statusMessage: "Copied transcript. Auto-paste needs Post Keyboard Events permission.",
                         transientSeconds: 8
                     )
@@ -358,7 +361,8 @@ final class AppCoordinator: NSObject {
                 logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
                 finalizeSuccessfulTranscriptDelivery(
                     text: text,
-                    recordingDurationSeconds: recordedClip.durationSeconds,
+                    fileMeasuredDurationSeconds: recordedClip.fileMeasuredDurationSeconds,
+                    recorderReportedDurationSeconds: recordedClip.recorderReportedDurationSeconds,
                     statusMessage: "Copied transcript (\(text.count) chars)."
                 )
             }
@@ -385,14 +389,16 @@ final class AppCoordinator: NSObject {
 
     private func finalizeSuccessfulTranscriptDelivery(
         text: String,
-        recordingDurationSeconds: TimeInterval,
+        fileMeasuredDurationSeconds: TimeInterval?,
+        recorderReportedDurationSeconds: TimeInterval,
         statusMessage: String,
         transientSeconds: TimeInterval? = 4
     ) {
         setIdleStatus(statusMessage, transientSeconds: transientSeconds)
         dictationStats.recordSuccessfulSession(
             text: text,
-            recordingDurationSeconds: recordingDurationSeconds
+            fileMeasuredDurationSeconds: fileMeasuredDurationSeconds,
+            recorderReportedDurationSeconds: recorderReportedDurationSeconds
         )
         refreshStatsMenu()
     }
@@ -463,6 +469,11 @@ final class AppCoordinator: NSObject {
 
         statsMenu.removeAllItems()
         statsMenu.autoenablesItems = false
+        if case let .suspicious(message) = summary.healthStatus {
+            statsMenu.addItem(disabledMenuItem(title: "Stats Warning"))
+            statsMenu.addItem(disabledMenuItem(title: message))
+            statsMenu.addItem(.separator())
+        }
         statsMenu.addItem(disabledMenuItem(title: "Typing Speed: \(formatTypingSpeed(summary.typingWordsPerMinute))"))
 
         if summary.snapshot.isEmpty {
@@ -652,6 +663,16 @@ final class AppCoordinator: NSObject {
 
     private func ensureEventPermission(_ access: PermissionService.EventAccess) -> Bool {
         permissions.ensureEventAccess(access)
+    }
+
+    private func logSuspiciousStatsIfNeeded() {
+        let snapshot = dictationStats.snapshot
+        guard case let .suspicious(message) = snapshot.healthStatus else {
+            return
+        }
+        logger.error(
+            "Stats aggregate looks suspicious sessions=\(snapshot.successfulSessions, privacy: .public) words=\(snapshot.totalWords, privacy: .public) recording_s=\(snapshot.totalRecordingSeconds, format: .fixed(precision: 3)) reason=\(message, privacy: .public)"
+        )
     }
 
     private func presentSetupGuidanceIfNeeded() {
