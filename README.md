@@ -1,129 +1,151 @@
-# groq-menubar-dictate
+<p align="center">
+  <img src="assets/groq-menubar-dictate-icon.svg" alt="Groq MenuBar Dictate icon" width="128" height="128">
+</p>
 
-Super-fast, lightweight macOS menu bar dictation using Groq transcription.
-Bare-bones by design: tap Option, speak, and get text. It just works.
+<h1 align="center">Groq MenuBar Dictate</h1>
 
-## Behavior
+<p align="center">
+  A tiny macOS menu bar app for fast speech-to-text with Groq.
+</p>
 
-- Option key only (no click required):
-  - Tap Option once -> start recording
-  - Tap Option again -> stop, transcribe, copy, auto-paste
-  - Press Escape while recording -> abort recording (discard, no transcription, Esc is consumed)
-- Option trigger key can be configured in Settings:
-  - `Any Option key`
-  - `Left Option key only`
-  - `Right Option key only`
-- Custom words are appended to the Groq prompt for better spelling.
-- Filter words remove case-insensitive chunks:
-  - `word `, `word, `, `word. `, `word.`
-- End-prune rules remove trailing spaces and trailing signoffs:
-  - `thank you`, `thank you for watching`, `thanks for watching` (case-insensitive, optional period)
-- Menu bar click is only for settings/status, not for recording control.
+Groq MenuBar Dictate is built for the moment when typing would slow you down.
+Tap Option, say what you want to write, tap Option again, and the transcript is copied or pasted into the app you were already using.
 
-## Performance Snapshot (MacBook M1 Pro)
+It is intentionally small: no heavy window, no account system, no background dashboard.
+Just quick dictation from the menu bar.
 
-- CPU: mostly `0.0%`, peak `1.0%`
-- Memory (`top MEM`): about `23 MB`
-- Memory (`ps RSS`): `64000 KB` (about `62.5 MB`, `%MEM 0.4`)
-- Designed to stay lean during idle + short dictation bursts.
-- In day-to-day use, this stays far lighter than heavier desktop transcription apps that can reach around `300 MB+`.
+## Highlights
 
-## Features
-
-- Native AppKit menu bar app (`NSStatusBar`, accessory app)
-- Audio capture (`AVAudioRecorder`) to temporary `.m4a`
-- Microphone input mode:
-  - `Automatic (system default)`
-  - `Always use this Mac's built-in microphone`
-- Groq API transcription (`/openai/v1/audio/transcriptions`)
-- Latency-focused flow:
-  - Stop recording on Option key-down while recording
-  - In-memory multipart upload prep (no extra temp upload file)
-  - Startup cleanup removes stale `dictation-*.m4a` temp files older than 24 hours
-- Option key trigger mode:
-  - `Any` / `Left` / `Right`
-- Custom words prompt loaded from:
-  - `~/Library/Application Support/groq-menubar-dictate/custom-words.txt`
-- Filter words loaded from:
-  - `~/Library/Application Support/groq-menubar-dictate/filter-words.txt`
-- End prune phrases loaded from:
-  - `~/Library/Application Support/groq-menubar-dictate/end-prune-phrases.txt`
-- Clipboard copy + optional Cmd+V auto-paste
-- API key stored in app settings (`UserDefaults`)
+- Tap Option once to start recording, then tap Option again to stop.
+- Transcribe with Groq's `whisper-large-v3-turbo` model by default.
+- Copy the transcript to your clipboard and optionally auto-paste it with Cmd+V.
+- Add custom words so names, projects, and uncommon terms are spelled better.
+- Trim unwanted filler words or trailing phrases before the text is pasted.
+- Choose whether either Option key, left Option, or right Option starts recording.
+- Runs as a native AppKit menu bar app and stays lightweight when idle.
 
 ## Requirements
 
-- macOS 13+
-- Swift 6.2+
-- Groq API key
+- macOS 13 or newer
+- Swift 6.2 or newer
+- A Groq API key
 
-## Run
+## Quick Start
+
+Clone the repo and launch it from source:
 
 ```bash
+git clone https://github.com/ht0324/groq-menubar-dictate.git
+cd groq-menubar-dictate
 swift run
 ```
 
-## Install to /Applications
+Open the menu bar item, choose `Open Settings`, and paste in your Groq API key.
+The app will ask for the macOS permissions it needs the first time you use the relevant feature.
 
-```bash
-./scripts/install_to_applications.sh
-open -a "/Applications/Groq MenuBar Dictate.app"
-```
+## How To Use
 
-### Stable Code Signing (Recommended)
+1. Tap Option once to begin recording.
+2. Speak naturally.
+3. Tap Option again to stop recording.
+4. Wait a moment for transcription.
+5. Use the pasted text, or grab it from the clipboard if auto-paste is disabled.
 
-To keep macOS permissions (Input Monitoring / Post Events / Microphone) stable across updates, install with a stable signing identity instead of ad-hoc signing.
+Press Escape while recording to cancel the current recording without transcribing it.
+The menu bar icon is for settings and status; recording is controlled from the keyboard.
 
-List available identities:
+## Install To Applications
 
-```bash
-security find-identity -v -p codesigning
-```
-
-Install with an explicit identity (preferred):
-
-```bash
-GROQ_DICTATE_SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" ./scripts/install_to_applications.sh
-```
-
-Optional hint-based identity matching (for example by email):
-
-```bash
-GROQ_DICTATE_SIGN_IDENTITY_HINT="huntae324@gmail.com" ./scripts/install_to_applications.sh
-```
-
-Ad-hoc signing fallback (not recommended, may reset permissions on every update):
+For everyday use, install the app bundle into `/Applications`:
 
 ```bash
 GROQ_DICTATE_ALLOW_ADHOC=1 ./scripts/install_to_applications.sh
+open -a "/Applications/Groq MenuBar Dictate.app"
 ```
 
-## Test
+Ad-hoc signing is convenient for a personal local build, but macOS may ask you to grant permissions again after updates.
+If you have an Apple code-signing certificate, use a stable signing identity instead:
 
 ```bash
-swift test
+security find-identity -v -p codesigning
+GROQ_DICTATE_SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" ./scripts/install_to_applications.sh
 ```
+
+You can also match an installed identity by hint:
+
+```bash
+GROQ_DICTATE_SIGN_IDENTITY_HINT="you@example.com" ./scripts/install_to_applications.sh
+```
+
+## Settings And Text Cleanup
+
+The Settings window lets you configure:
+
+- Groq API key
+- Transcription model
+- Optional language hint
+- Auto-paste behavior
+- Launch at login
+- Microphone input mode
+- Option key trigger mode
+- Recording tap timing
+- Maximum audio size
+- End-of-transcript pruning
+
+You can also edit local text files for cleanup rules:
+
+- Custom words: `~/Library/Application Support/groq-menubar-dictate/custom-words.txt`
+- Filter words: `~/Library/Application Support/groq-menubar-dictate/filter-words.txt`
+- End prune phrases: `~/Library/Application Support/groq-menubar-dictate/end-prune-phrases.txt`
+
+Custom words are added to the transcription prompt.
+Filter words remove matching text chunks case-insensitively.
+End prune phrases trim common trailing signoffs such as `thank you` or `thanks for watching`.
 
 ## Permissions
 
-The app may require:
+macOS may ask for:
 
-- Microphone access (recording)
-- Input Monitoring (global Option key detection)
-- Post keyboard events permission (auto-paste event injection)
+- Microphone access, so the app can record short audio clips.
+- Input Monitoring, so it can detect the global Option key tap.
+- Permission to post keyboard events, so auto-paste can send Cmd+V.
 
-Use menu item `Test Permissions` to prompt/check status.
-If auto-paste or Escape abort is unavailable, grant Input Monitoring / Post Keyboard Events when prompted.
+Use the `Test Permissions` menu item to check what is still missing.
+If a permission is missing, transcription can still copy to the clipboard, but the related feature may be unavailable.
 
-## Notes
+## Privacy And Local Data
 
-- Prioritizes speed and simplicity over complex UI/feature bloat.
-- API key is configured in `Open Settings`.
-- Startup behavior is configurable in `Open Settings` via `Launch at login`.
-- End-prune behavior is configurable in `Open Settings` via `Prune transcript ending phrases`.
-- Microphone mode is configurable in `Open Settings` via `Microphone input`.
-- Option key trigger mode is configurable in `Open Settings` via `Option key`.
-- In built-in mic mode, the app temporarily sets macOS default input to the internal microphone during recording and restores the previous input when recording stops.
-- On startup, stale temp recordings (`dictation-*.m4a`) older than 24 hours are pruned from the system temp directory.
-- If auto-paste permission is missing, transcript is still copied to clipboard.
-- App is single-instance protected. Launching it again will not create another active instance.
+- Your Groq API key is stored locally in app settings through `UserDefaults`.
+- Audio is recorded to temporary `.m4a` files before upload to Groq for transcription.
+- Startup cleanup removes stale `dictation-*.m4a` temp files older than 24 hours.
+- Personal cleanup files live in `~/Library/Application Support/groq-menubar-dictate/`.
+- Do not commit API keys or personal cleanup files to the repository.
+
+## Development
+
+Run these commands from the repository root:
+
+```bash
+swift build
+swift test
+swift test --filter OptionTapValidatorTests
+swift run
+```
+
+The code is organized around small services:
+
+- `AppCoordinator.swift` owns the record, transcribe, copy, and paste flow.
+- `AudioRecorderService.swift` records temporary audio clips.
+- `GroqTranscriptionService.swift` sends audio to Groq.
+- `PermissionService.swift` checks the macOS permissions.
+- `*Store` types persist settings, text cleanup rules, and stats.
+
+Tests live in `Tests/GroqMenuBarDictateTests/` and avoid real microphone or network dependencies.
+
+## Performance Snapshot
+
+On a MacBook M1 Pro during local testing:
+
+- CPU is usually near `0.0%` when idle.
+- Memory is roughly `23 MB` in `top` and about `62.5 MB` RSS in `ps`.
+- The app is designed to stay quiet during idle time and quick dictation bursts.
