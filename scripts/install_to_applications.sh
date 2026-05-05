@@ -9,6 +9,7 @@ INSTALL_DIR="/Applications"
 INSTALL_PATH="${INSTALL_DIR}/${APP_NAME}"
 SIGN_IDENTITY="${GROQ_DICTATE_SIGN_IDENTITY:-}"
 SIGN_IDENTITY_HINT="${GROQ_DICTATE_SIGN_IDENTITY_HINT:-}"
+LOCAL_SIGN_IDENTITY="${GROQ_DICTATE_LOCAL_SIGN_IDENTITY:-Groq MenuBar Dictate Local Code Signing}"
 ALLOW_ADHOC_SIGNING="${GROQ_DICTATE_ALLOW_ADHOC:-0}"
 
 resolve_sign_identity() {
@@ -42,12 +43,19 @@ resolve_sign_identity() {
     return 0
   fi
 
+  identity="$(printf '%s\n' "${identities}" | grep -F "\"${LOCAL_SIGN_IDENTITY}\"" | sed -n 's/.*"\(.*\)".*/\1/p' | head -n 1 || true)"
+  if [[ -n "${identity}" ]]; then
+    echo "${identity}"
+    return 0
+  fi
+
   if [[ "${ALLOW_ADHOC_SIGNING}" == "1" ]]; then
     echo "-"
     return 0
   fi
 
   echo "No usable code-signing identity found." >&2
+  echo "For stable local permissions, run ./scripts/create_local_signing_identity.sh once." >&2
   echo "Install an Apple Development or Developer ID Application certificate." >&2
   echo "Then rerun with GROQ_DICTATE_SIGN_IDENTITY=\"<certificate common name>\"." >&2
   if [[ -n "${SIGN_IDENTITY_HINT}" ]]; then

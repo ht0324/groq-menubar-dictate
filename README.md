@@ -59,12 +59,12 @@ The menu bar icon is for settings and status; recording is controlled from the k
 For everyday use, install the app bundle into `/Applications`:
 
 ```bash
-GROQ_DICTATE_ALLOW_ADHOC=1 ./scripts/install_to_applications.sh
+./scripts/create_local_signing_identity.sh
+./scripts/install_to_applications.sh
 open -a "/Applications/Groq MenuBar Dictate.app"
 ```
 
-Ad-hoc signing is convenient for a personal local build, but macOS may ask you to grant permissions again after updates.
-If you have an Apple code-signing certificate, use a stable signing identity instead:
+The local signing identity is self-signed and only for this Mac, but it keeps the app identity stable so macOS is less likely to ask for Accessibility/Input Monitoring again after every reinstall. If you have an Apple code-signing certificate, the installer will prefer that stable identity instead:
 
 ```bash
 security find-identity -v -p codesigning
@@ -75,6 +75,12 @@ You can also match an installed identity by hint:
 
 ```bash
 GROQ_DICTATE_SIGN_IDENTITY_HINT="you@example.com" ./scripts/install_to_applications.sh
+```
+
+Ad-hoc signing is still available for one-off local builds, but it may reset macOS permissions after updates:
+
+```bash
+GROQ_DICTATE_ALLOW_ADHOC=1 ./scripts/install_to_applications.sh
 ```
 
 ## Settings And Text Cleanup

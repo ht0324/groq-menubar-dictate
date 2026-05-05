@@ -27,7 +27,6 @@ enum AudioRecorderError: LocalizedError {
 
 struct RecordedClip {
     let fileURL: URL
-    let fileMeasuredDurationSeconds: TimeInterval?
     let recorderReportedDurationSeconds: TimeInterval
 }
 
@@ -93,10 +92,8 @@ final class AudioRecorderService: NSObject {
         recorder.stop()
         self.recorder = nil
         restoreInputOverrideIfNeeded()
-        let fileMeasuredDurationSeconds = recordedFileDuration(for: fileURL)
         return RecordedClip(
             fileURL: fileURL,
-            fileMeasuredDurationSeconds: fileMeasuredDurationSeconds,
             recorderReportedDurationSeconds: recorderReportedDurationSeconds
         )
     }
@@ -127,7 +124,7 @@ final class AudioRecorderService: NSObject {
         ]
     }
 
-    private func recordedFileDuration(for fileURL: URL) -> TimeInterval? {
+    func recordedFileDuration(for fileURL: URL) -> TimeInterval? {
         guard let player = try? AVAudioPlayer(contentsOf: fileURL) else {
             return nil
         }

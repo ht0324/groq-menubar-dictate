@@ -1,10 +1,5 @@
 import Foundation
 
-struct TranscriptResult {
-    let text: String
-    let model: String?
-}
-
 struct TranscriptionMetrics {
     let uploadPreparationMilliseconds: Double
     let networkRoundTripMilliseconds: Double
@@ -12,7 +7,7 @@ struct TranscriptionMetrics {
 }
 
 struct TranscriptionResponse {
-    let transcript: TranscriptResult
+    let text: String
     let metrics: TranscriptionMetrics?
 }
 
@@ -43,6 +38,7 @@ actor GroqTranscriptionService {
     private let endpoint: URL
     private let urlSession: URLSession
     private let fileManager: FileManager
+    private let multipartBuilder: MultipartFormDataUploadBuilder
 
     init(
         endpoint: URL = AppConfig.defaultGroqEndpoint,
@@ -52,6 +48,7 @@ actor GroqTranscriptionService {
         self.endpoint = endpoint
         self.urlSession = urlSession
         self.fileManager = fileManager
+        self.multipartBuilder = MultipartFormDataUploadBuilder(fileManager: fileManager)
     }
 
     func transcribe(
@@ -84,38 +81,43 @@ actor GroqTranscriptionService {
 
         let uploadPreparationStart = collectMetrics ? DispatchTime.now() : nil
         let boundary = "Boundary-\(UUID().uuidString)"
-        let audioData: Data
-        do {
-            audioData = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
-        } catch {
-            throw GroqTranscriptionError.fileReadFailed
-        }
-        guard !audioData.isEmpty else {
-            throw GroqTranscriptionError.missingAudio
-        }
-
-        let body = makeMultipartBody(
-            boundary: boundary,
-            fileData: audioData,
-            fileName: fileURL.lastPathComponent,
-            mimeType: mimeType(for: fileURL),
+        let fields = transcriptionFields(
             model: model,
             language: language,
             prompt: prompt
         )
+        let filePart = MultipartFormDataFilePart(
+            fieldName: "file",
+            fileURL: fileURL,
+            fileName: fileURL.lastPathComponent,
+            mimeType: mimeType(for: fileURL)
+        )
+        let multipartBodyFile: MultipartFormDataUploadFile
+        do {
+            multipartBodyFile = try multipartBuilder.makeUploadFile(
+                boundary: boundary,
+                fields: fields,
+                filePart: filePart
+            )
+        } catch {
+            throw GroqTranscriptionError.fileReadFailed
+        }
+        defer {
+            try? fileManager.removeItem(at: multipartBodyFile.fileURL)
+        }
 
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = timeout
-        request.httpBody = body
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("text/plain", forHTTPHeaderField: "Accept")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(String(multipartBodyFile.contentLength), forHTTPHeaderField: "Content-Length")
 
         let uploadPreparationMilliseconds = millisecondsSince(uploadPreparationStart)
 
         let networkStart = collectMetrics ? DispatchTime.now() : nil
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await urlSession.upload(for: request, fromFile: multipartBodyFile.fileURL)
         let networkRoundTripMilliseconds = millisecondsSince(networkStart)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -128,7 +130,7 @@ actor GroqTranscriptionService {
         }
 
         let parseStart = collectMetrics ? DispatchTime.now() : nil
-        let transcript = try parseTranscriptResponse(data)
+        let text = try parseTranscriptResponse(data)
         let responseParseMilliseconds = millisecondsSince(parseStart)
 
         let metrics: TranscriptionMetrics?
@@ -142,47 +144,25 @@ actor GroqTranscriptionService {
             metrics = nil
         }
 
-        return TranscriptionResponse(transcript: transcript, metrics: metrics)
+        return TranscriptionResponse(text: text, metrics: metrics)
     }
 
-    private func makeMultipartBody(
-        boundary: String,
-        fileData: Data,
-        fileName: String,
-        mimeType: String,
+    private func transcriptionFields(
         model: String,
         language: String?,
         prompt: String?
-    ) -> Data {
-        var body = Data()
-        body.reserveCapacity(fileData.count + 1024 + model.utf8.count + (language?.utf8.count ?? 0) + (prompt?.utf8.count ?? 0))
-
-        func writeUTF8(_ string: String) {
-            body.append(Data(string.utf8))
-        }
-
-        func writeField(name: String, value: String) {
-            writeUTF8("--\(boundary)\r\n")
-            writeUTF8("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
-            writeUTF8("\(value)\r\n")
-        }
-
-        writeField(name: "model", value: model)
-        writeField(name: "response_format", value: "json")
+    ) -> [MultipartFormDataField] {
+        var fields = [
+            MultipartFormDataField(name: "model", value: model),
+            MultipartFormDataField(name: "response_format", value: "text"),
+        ]
         if let language, !language.isEmpty {
-            writeField(name: "language", value: language)
+            fields.append(MultipartFormDataField(name: "language", value: language))
         }
         if let prompt, !prompt.isEmpty {
-            writeField(name: "prompt", value: prompt)
+            fields.append(MultipartFormDataField(name: "prompt", value: prompt))
         }
-
-        writeUTF8("--\(boundary)\r\n")
-        writeUTF8("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n")
-        writeUTF8("Content-Type: \(mimeType)\r\n\r\n")
-        body.append(fileData)
-        writeUTF8("\r\n")
-        writeUTF8("--\(boundary)--\r\n")
-        return body
+        return fields
     }
 
     private func audioFileSize(for fileURL: URL) throws -> Int {
@@ -193,20 +173,14 @@ actor GroqTranscriptionService {
         return size.intValue
     }
 
-    private func parseTranscriptResponse(_ data: Data) throws -> TranscriptResult {
-        if let object = try? JSONSerialization.jsonObject(with: data),
-           let dict = object as? [String: Any]
-        {
-            let text = (dict["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let model = (dict["model"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return TranscriptResult(text: text, model: model?.isEmpty == false ? model : nil)
+    private func parseTranscriptResponse(_ data: Data) throws -> String {
+        guard let text = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !text.isEmpty
+        else {
+            throw GroqTranscriptionError.malformedResponse
         }
-
-        let fallback = readableBodyString(from: data)
-        if !fallback.isEmpty {
-            return TranscriptResult(text: fallback, model: nil)
-        }
-        throw GroqTranscriptionError.malformedResponse
+        return text
     }
 
     private func readableBodyString(from data: Data) -> String {
