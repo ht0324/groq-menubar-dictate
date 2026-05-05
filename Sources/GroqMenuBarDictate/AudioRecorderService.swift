@@ -142,34 +142,40 @@ final class AudioRecorderService: NSObject {
 private struct InputDeviceOverride {
     static let none = InputDeviceOverride(
         previousInputDeviceID: AudioDeviceID(bitPattern: 0),
-        changedDefaultInputDevice: false
+        changedDefaultInputDevice: false,
+        shouldRestorePreviousInputDevice: true
     )
 
     let previousInputDeviceID: AudioDeviceID
     let changedDefaultInputDevice: Bool
+    let shouldRestorePreviousInputDevice: Bool
 
     static func installBuiltInMicrophoneAsDefaultInput() throws -> InputDeviceOverride {
         let previousInputDeviceID = try SystemAudioInputSelector.defaultInputDeviceID()
         guard let builtInMicrophoneID = try SystemAudioInputSelector.builtInMicrophoneInputDeviceID() else {
             throw AudioRecorderError.builtInMicrophoneUnavailable
         }
+        let shouldRestorePreviousInputDevice = SystemAudioInputSelector
+            .shouldRestoreInputDeviceAfterRecording(previousInputDeviceID)
 
         guard builtInMicrophoneID != previousInputDeviceID else {
             return InputDeviceOverride(
                 previousInputDeviceID: previousInputDeviceID,
-                changedDefaultInputDevice: false
+                changedDefaultInputDevice: false,
+                shouldRestorePreviousInputDevice: shouldRestorePreviousInputDevice
             )
         }
 
         try SystemAudioInputSelector.setDefaultInputDeviceID(builtInMicrophoneID)
         return InputDeviceOverride(
             previousInputDeviceID: previousInputDeviceID,
-            changedDefaultInputDevice: true
+            changedDefaultInputDevice: true,
+            shouldRestorePreviousInputDevice: shouldRestorePreviousInputDevice
         )
     }
 
     func restore() throws {
-        guard changedDefaultInputDevice else {
+        guard changedDefaultInputDevice, shouldRestorePreviousInputDevice else {
             return
         }
         try SystemAudioInputSelector.setDefaultInputDeviceID(previousInputDeviceID)
@@ -178,45 +184,22 @@ private struct InputDeviceOverride {
 
 private enum SystemAudioInputSelector {
     static func defaultInputDeviceID() throws -> AudioDeviceID {
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var deviceID = AudioDeviceID(bitPattern: 0)
-        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &propertyAddress,
-            0,
-            nil,
-            &dataSize,
-            &deviceID
-        )
-        guard status == noErr else {
-            throw CoreAudioError.failed(operation: "read default input device", status: status)
-        }
-        return deviceID
+        try SystemAudioDeviceInspector.defaultInputDeviceID()
     }
 
     static func setDefaultInputDeviceID(_ deviceID: AudioDeviceID) throws {
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var mutableDeviceID = deviceID
-        let status = AudioObjectSetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &propertyAddress,
-            0,
-            nil,
-            UInt32(MemoryLayout<AudioDeviceID>.size),
-            &mutableDeviceID
-        )
-        guard status == noErr else {
-            throw CoreAudioError.failed(operation: "set default input device", status: status)
+        try SystemAudioDeviceInspector.setDefaultInputDeviceID(deviceID)
+    }
+
+    static func shouldRestoreInputDeviceAfterRecording(_ deviceID: AudioDeviceID) -> Bool {
+        guard let deviceInfo = try? SystemAudioDeviceInspector.deviceInfo(for: deviceID) else {
+            return true
         }
+        return !AudioDeviceRoutingPolicy.shouldAvoidAutomaticActivation(
+            name: deviceInfo.name,
+            uid: deviceInfo.uid,
+            transportType: deviceInfo.transportType
+        )
     }
 
     static func builtInMicrophoneInputDeviceID() throws -> AudioDeviceID? {
@@ -237,7 +220,7 @@ private enum SystemAudioInputSelector {
 
     private static func deviceID(matchingUID targetUID: String) throws -> AudioDeviceID? {
         for deviceID in try allAudioDeviceIDs() {
-            guard let uid = try deviceUID(for: deviceID) else {
+            guard let uid = try SystemAudioDeviceInspector.deviceInfo(for: deviceID).uid else {
                 continue
             }
             if uid == targetUID {
@@ -288,41 +271,4 @@ private enum SystemAudioInputSelector {
         return deviceIDs
     }
 
-    private static func deviceUID(for deviceID: AudioDeviceID) throws -> String? {
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceUID,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        guard AudioObjectHasProperty(deviceID, &propertyAddress) else {
-            return nil
-        }
-
-        var dataSize = UInt32(MemoryLayout<CFString?>.size)
-        let uidStorage = UnsafeMutableRawPointer.allocate(
-            byteCount: Int(dataSize),
-            alignment: MemoryLayout<CFString?>.alignment
-        )
-        defer {
-            uidStorage.deallocate()
-        }
-
-        let status = AudioObjectGetPropertyData(
-            deviceID,
-            &propertyAddress,
-            0,
-            nil,
-            &dataSize,
-            uidStorage
-        )
-        guard status == noErr else {
-            throw CoreAudioError.failed(operation: "read audio device UID", status: status)
-        }
-        let uid = uidStorage.load(as: CFString?.self)
-        return uid as String?
-    }
-}
-
-private enum CoreAudioError: Error {
-    case failed(operation: String, status: OSStatus)
 }
