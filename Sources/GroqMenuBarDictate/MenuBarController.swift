@@ -13,9 +13,6 @@ struct MenuBarActions {
     let discardLastRecording: Selector
     let openSettings: Selector
     let testPermissions: Selector
-    let openCustomWords: Selector
-    let openFilterWords: Selector
-    let openEndPrunePhrases: Selector
     let quit: Selector
 }
 
@@ -87,6 +84,7 @@ final class MenuBarController {
         snapshot: SettingsSnapshot,
         onSave: @escaping (SettingsSnapshot) -> Void,
         onOpenWordsFile: @escaping () -> Void,
+        onOpenFilterWordsFile: @escaping () -> Void,
         onOpenEndPrunePhrasesFile: @escaping () -> Void,
         onTestPermissions: @escaping () -> Void
     ) {
@@ -94,6 +92,7 @@ final class MenuBarController {
             snapshot: snapshot,
             onSave: onSave,
             onOpenWordsFile: onOpenWordsFile,
+            onOpenFilterWordsFile: onOpenFilterWordsFile,
             onOpenEndPrunePhrasesFile: onOpenEndPrunePhrasesFile,
             onTestPermissions: onTestPermissions
         )
@@ -156,9 +155,6 @@ final class MenuBarController {
         menu.addItem(menuItem(title: "Test Permissions", action: actions.testPermissions))
         statsMenuItem.submenu = statsMenu
         menu.addItem(statsMenuItem)
-        menu.addItem(menuItem(title: "Open Custom Words File", action: actions.openCustomWords))
-        menu.addItem(menuItem(title: "Open Filter Words File", action: actions.openFilterWords))
-        menu.addItem(menuItem(title: "Open End Prune Phrases File", action: actions.openEndPrunePhrases))
         menu.addItem(.separator())
         menu.addItem(menuItem(title: "Quit", action: actions.quit, keyEquivalent: "q"))
 

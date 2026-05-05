@@ -55,6 +55,7 @@ private final class SettingsWindow: NSWindow {
 final class SettingsWindowController: NSWindowController {
     private let onSave: (SettingsSnapshot) -> Void
     private let onOpenWordsFile: () -> Void
+    private let onOpenFilterWordsFile: () -> Void
     private let onOpenEndPrunePhrasesFile: () -> Void
     private let onTestPermissions: () -> Void
 
@@ -73,16 +74,18 @@ final class SettingsWindowController: NSWindowController {
         snapshot: SettingsSnapshot,
         onSave: @escaping (SettingsSnapshot) -> Void,
         onOpenWordsFile: @escaping () -> Void,
+        onOpenFilterWordsFile: @escaping () -> Void,
         onOpenEndPrunePhrasesFile: @escaping () -> Void,
         onTestPermissions: @escaping () -> Void
     ) {
         self.onSave = onSave
         self.onOpenWordsFile = onOpenWordsFile
+        self.onOpenFilterWordsFile = onOpenFilterWordsFile
         self.onOpenEndPrunePhrasesFile = onOpenEndPrunePhrasesFile
         self.onTestPermissions = onTestPermissions
 
         let window = SettingsWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 660),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -90,6 +93,7 @@ final class SettingsWindowController: NSWindowController {
         window.title = "Groq Dictation Settings"
         super.init(window: window)
         setupUI(snapshot: snapshot)
+        window.center()
     }
 
     @available(*, unavailable)
@@ -104,7 +108,9 @@ final class SettingsWindowController: NSWindowController {
 
         apiKeyField.stringValue = snapshot.apiKey
         modelField.stringValue = snapshot.model
+        modelField.placeholderString = "whisper-large-v3-turbo"
         languageField.stringValue = snapshot.languageHint
+        languageField.placeholderString = "en, ko, ja..."
         typingSpeedField.placeholderString = "Optional"
         typingSpeedField.stringValue = snapshot.typingWordsPerMinute > 0 ? String(snapshot.typingWordsPerMinute) : ""
         optionKeyModePopup.removeAllItems()
@@ -134,57 +140,99 @@ final class SettingsWindowController: NSWindowController {
 
         let stack = NSStackView()
         stack.orientation = .vertical
-        stack.spacing = 14
+        stack.alignment = .leading
+        stack.spacing = 18
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let title = NSTextField(labelWithString: "Option-key-only dictation (no clicking needed)")
-        title.font = NSFont.boldSystemFont(ofSize: 13)
+        let title = NSTextField(labelWithString: "Groq Dictation Settings")
+        title.alignment = .left
+        title.font = NSFont.boldSystemFont(ofSize: 17)
 
         let hint = NSTextField(
-            wrappingLabelWithString: "Paste your Groq API key, then click Test Permissions to grant Microphone and Input Monitoring. After setup, tap Option once to start recording and again to stop."
+            wrappingLabelWithString: "Tap Option once to start recording and again to stop. Grant Microphone and Input Monitoring once during setup."
         )
+        hint.alignment = .left
         hint.textColor = .secondaryLabelColor
         hint.maximumNumberOfLines = 0
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        hint.widthAnchor.constraint(equalToConstant: 580).isActive = true
 
         stack.addArrangedSubview(title)
         stack.addArrangedSubview(hint)
-        stack.addArrangedSubview(makeLabeledRow(label: "Groq API key", control: apiKeyField))
-        stack.addArrangedSubview(makeLabeledRow(label: "Model", control: modelField))
-        stack.addArrangedSubview(makeLabeledRow(label: "Language hint (optional)", control: languageField))
-        stack.addArrangedSubview(makeLabeledRow(label: "Typing speed (WPM)", control: typingSpeedField))
+
+        let testPermissionsButton = NSButton(title: "Test Permissions", target: self, action: #selector(testPermissionsTapped))
+        stack.addArrangedSubview(makeSection(
+            title: "Account",
+            arrangedSubviews: [
+                makeLabeledRow(label: "Groq API key", control: apiKeyField),
+                makeLabeledRow(label: "Permissions", control: testPermissionsButton, controlWidth: 160),
+            ]
+        ))
+
+        let openWordsButton = NSButton(title: "Open Custom Words File", target: self, action: #selector(openWordsTapped))
+        let openFilterWordsButton = NSButton(title: "Open Filter Words File", target: self, action: #selector(openFilterWordsTapped))
+        let openEndPrunePhrasesButton = NSButton(title: "Open End Prune Phrases File", target: self, action: #selector(openEndPrunePhrasesTapped))
+        stack.addArrangedSubview(makeSection(
+            title: "Transcription",
+            arrangedSubviews: [
+                makeLabeledRow(label: "Model", control: modelField),
+                makeLabeledRow(label: "Language hint", control: languageField),
+                makeLabeledRow(label: "Custom words", control: openWordsButton, controlWidth: 210),
+                makeLabeledRow(label: "Filter words", control: openFilterWordsButton, controlWidth: 210),
+                makeLabeledRow(label: "Ending phrases", control: openEndPrunePhrasesButton, controlWidth: 240),
+            ]
+        ))
+
+        stack.addArrangedSubview(makeSection(
+            title: "Input",
+            arrangedSubviews: [
+                makeLabeledRow(label: "Option key", control: optionKeyModePopup, controlWidth: 340),
+                makeLabeledRow(label: "Microphone", control: microphoneInputModePopup, controlWidth: 400),
+            ]
+        ))
+
+        stack.addArrangedSubview(makeSection(
+            title: "Behavior",
+            arrangedSubviews: [
+                makeCheckboxRow(launchAtLoginCheckbox),
+                makeCheckboxRow(autoPasteCheckbox),
+                makeCheckboxRow(endPruneCheckbox),
+            ]
+        ))
+
         let typingHint = NSTextField(
-            wrappingLabelWithString: "Used to estimate cumulative time saved. Leave blank or 0 to disable the saved-time stats."
+            wrappingLabelWithString: "Used only for the cumulative time-saved estimate. Leave blank or 0 to disable."
         )
+        typingHint.alignment = .left
         typingHint.textColor = .secondaryLabelColor
         typingHint.maximumNumberOfLines = 0
-        stack.addArrangedSubview(typingHint)
-        stack.addArrangedSubview(makeLabeledRow(label: "Option key", control: optionKeyModePopup))
-        stack.addArrangedSubview(makeLabeledRow(label: "Microphone input", control: microphoneInputModePopup))
-        stack.addArrangedSubview(launchAtLoginCheckbox)
-        stack.addArrangedSubview(autoPasteCheckbox)
-        stack.addArrangedSubview(endPruneCheckbox)
-        stack.addArrangedSubview(diagnosticsCheckbox)
+        stack.addArrangedSubview(makeSection(
+            title: "Stats & Diagnostics",
+            arrangedSubviews: [
+                makeLabeledRow(label: "Typing speed", control: typingSpeedField, controlWidth: 120),
+                makeIndentedHelpRow(typingHint),
+                makeCheckboxRow(diagnosticsCheckbox),
+            ]
+        ))
 
         let buttonRow = NSStackView()
         buttonRow.orientation = .horizontal
         buttonRow.spacing = 10
+        buttonRow.translatesAutoresizingMaskIntoConstraints = false
 
-        let openWordsButton = NSButton(title: "Open Custom Words File", target: self, action: #selector(openWordsTapped))
-        let openEndPrunePhrasesButton = NSButton(title: "Open End Prune Phrases File", target: self, action: #selector(openEndPrunePhrasesTapped))
-        let testPermissionsButton = NSButton(title: "Test Permissions", target: self, action: #selector(testPermissionsTapped))
         let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
         let saveButton = NSButton(title: "Save", target: self, action: #selector(saveTapped))
         saveButton.keyEquivalent = "\r"
         saveButton.bezelColor = .systemBlue
 
-        buttonRow.addArrangedSubview(openWordsButton)
-        buttonRow.addArrangedSubview(openEndPrunePhrasesButton)
-        buttonRow.addArrangedSubview(testPermissionsButton)
-        buttonRow.addArrangedSubview(NSView())
+        let buttonSpacer = NSView()
+        buttonSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        buttonRow.addArrangedSubview(buttonSpacer)
         buttonRow.addArrangedSubview(cancelButton)
         buttonRow.addArrangedSubview(saveButton)
 
         stack.addArrangedSubview(buttonRow)
+        buttonRow.widthAnchor.constraint(equalToConstant: 580).isActive = true
         contentView.addSubview(stack)
 
         NSLayoutConstraint.activate([
@@ -195,23 +243,67 @@ final class SettingsWindowController: NSWindowController {
         ])
     }
 
-    private func makeLabeledRow(label: String, control: NSControl) -> NSView {
+    private func makeSection(title: String, arrangedSubviews: [NSView]) -> NSView {
+        let titleView = NSTextField(labelWithString: title)
+        titleView.alignment = .left
+        titleView.font = NSFont.boldSystemFont(ofSize: 12)
+        titleView.textColor = .secondaryLabelColor
+
+        let sectionStack = NSStackView()
+        sectionStack.orientation = .vertical
+        sectionStack.alignment = .leading
+        sectionStack.spacing = 8
+        sectionStack.translatesAutoresizingMaskIntoConstraints = false
+        sectionStack.addArrangedSubview(titleView)
+        for view in arrangedSubviews {
+            sectionStack.addArrangedSubview(view)
+        }
+        return sectionStack
+    }
+
+    private func makeLabeledRow(label: String, control: NSControl, controlWidth: CGFloat = 420) -> NSView {
         let labelView = NSTextField(labelWithString: label)
-        labelView.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        labelView.translatesAutoresizingMaskIntoConstraints = false
+        labelView.alignment = .right
+        labelView.setContentHuggingPriority(.required, for: .horizontal)
+        labelView.widthAnchor.constraint(equalToConstant: 128).isActive = true
 
         control.translatesAutoresizingMaskIntoConstraints = false
         control.heightAnchor.constraint(equalToConstant: 24).isActive = true
-        control.widthAnchor.constraint(greaterThanOrEqualToConstant: 340).isActive = true
+        control.widthAnchor.constraint(equalToConstant: controlWidth).isActive = true
 
         let row = NSStackView(views: [labelView, control])
         row.orientation = .horizontal
-        row.spacing = 10
+        row.alignment = .centerY
+        row.spacing = 12
+        row.distribution = .fill
+        return row
+    }
+
+    private func makeCheckboxRow(_ checkbox: NSButton) -> NSView {
+        makeLabeledRow(label: "", control: checkbox, controlWidth: 260)
+    }
+
+    private func makeIndentedHelpRow(_ helpView: NSTextField) -> NSView {
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.widthAnchor.constraint(equalToConstant: 128).isActive = true
+        helpView.translatesAutoresizingMaskIntoConstraints = false
+        helpView.widthAnchor.constraint(equalToConstant: 420).isActive = true
+
+        let row = NSStackView(views: [spacer, helpView])
+        row.orientation = .horizontal
+        row.spacing = 12
         row.distribution = .fill
         return row
     }
 
     @objc private func openWordsTapped() {
         onOpenWordsFile()
+    }
+
+    @objc private func openFilterWordsTapped() {
+        onOpenFilterWordsFile()
     }
 
     @objc private func openEndPrunePhrasesTapped() {

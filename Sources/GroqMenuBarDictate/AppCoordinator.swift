@@ -63,9 +63,6 @@ final class AppCoordinator: NSObject {
                 discardLastRecording: #selector(discardLastRecordingFromMenu),
                 openSettings: #selector(openSettingsFromMenu),
                 testPermissions: #selector(testPermissionsFromMenu),
-                openCustomWords: #selector(openCustomWordsFromMenu),
-                openFilterWords: #selector(openFilterWordsFromMenu),
-                openEndPrunePhrases: #selector(openEndPrunePhrasesFromMenu),
                 quit: #selector(quitFromMenu)
             )
         )
@@ -493,6 +490,9 @@ final class AppCoordinator: NSObject {
             },
             onOpenWordsFile: { [weak self] in
                 self?.openCustomWordsFromMenu()
+            },
+            onOpenFilterWordsFile: { [weak self] in
+                self?.openFilterWordsFromMenu()
             },
             onOpenEndPrunePhrasesFile: { [weak self] in
                 self?.openEndPrunePhrasesFromMenu()
