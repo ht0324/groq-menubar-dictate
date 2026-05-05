@@ -9,6 +9,8 @@ enum MenuBarStatusState {
 }
 
 struct MenuBarActions {
+    let retryLastRecording: Selector
+    let discardLastRecording: Selector
     let openSettings: Selector
     let testPermissions: Selector
     let openCustomWords: Selector
@@ -22,6 +24,9 @@ final class MenuBarController {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let statusMenuItem = NSMenuItem(title: "Starting...", action: nil, keyEquivalent: "")
+    private let retryLastRecordingMenuItem = NSMenuItem(title: "Retry Last Recording", action: nil, keyEquivalent: "")
+    private let discardLastRecordingMenuItem = NSMenuItem(title: "Discard Last Recording", action: nil, keyEquivalent: "")
+    private let retrySeparator = NSMenuItem.separator()
     private let statsMenu = NSMenu(title: "Stats")
     private let statsMenuItem = NSMenuItem(title: "Stats", action: nil, keyEquivalent: "")
 
@@ -36,6 +41,14 @@ final class MenuBarController {
         statusMenuItem.title = message
         statusItem.button?.toolTip = message
         updateStatusItemAppearance(for: state)
+    }
+
+    func updateRetryControls(isAvailable: Bool, isEnabled: Bool) {
+        retryLastRecordingMenuItem.isHidden = !isAvailable
+        discardLastRecordingMenuItem.isHidden = !isAvailable
+        retrySeparator.isHidden = !isAvailable
+        retryLastRecordingMenuItem.isEnabled = isAvailable && isEnabled
+        discardLastRecordingMenuItem.isEnabled = isAvailable && isEnabled
     }
 
     func updateStats(
@@ -129,6 +142,14 @@ final class MenuBarController {
     private func configureMenu(target: AnyObject, actions: MenuBarActions) {
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
+
+        retryLastRecordingMenuItem.action = actions.retryLastRecording
+        discardLastRecordingMenuItem.action = actions.discardLastRecording
+        menu.addItem(retryLastRecordingMenuItem)
+        menu.addItem(discardLastRecordingMenuItem)
+        menu.addItem(retrySeparator)
+        updateRetryControls(isAvailable: false, isEnabled: false)
+
         menu.addItem(.separator())
 
         menu.addItem(menuItem(title: "Open Settings", action: actions.openSettings, keyEquivalent: ","))

@@ -38,6 +38,7 @@ final class AppCoordinator: NSObject {
     private var state: State = .idle
     private var statusMessage = "Idle: tap Option to record."
     private var idleResetWorkItem: DispatchWorkItem?
+    private var pendingRetryClip: RecordedClip?
 
     private struct WorkflowTiming {
         var stopRecordingMilliseconds: Double = 0
@@ -58,6 +59,8 @@ final class AppCoordinator: NSObject {
         menuBar.configure(
             target: self,
             actions: MenuBarActions(
+                retryLastRecording: #selector(retryLastRecordingFromMenu),
+                discardLastRecording: #selector(discardLastRecordingFromMenu),
                 openSettings: #selector(openSettingsFromMenu),
                 testPermissions: #selector(testPermissionsFromMenu),
                 openCustomWords: #selector(openCustomWordsFromMenu),
@@ -157,6 +160,7 @@ final class AppCoordinator: NSObject {
 
         do {
             try recorder.startRecording(mode: settings.microphoneInputMode)
+            clearPendingRetryClip(deleteFile: true)
             let hasListen = ensureEventPermission(.listen)
             if hasListen {
                 setState(.recording, message: "Recording... tap Option to stop (Esc aborts).")
@@ -191,11 +195,46 @@ final class AppCoordinator: NSObject {
             return
         }
 
-        setState(.transcribing, message: "Transcribing...")
-        defer {
-            try? FileManager.default.removeItem(at: recordedClip.fileURL)
+        await transcribeRecordedClip(
+            recordedClip,
+            diagnosticsEnabled: diagnosticsEnabled,
+            flowStart: flowStart,
+            initialTiming: timing,
+            transcribingMessage: "Transcribing..."
+        )
+    }
+
+    private func retryLastRecordingFlow() async {
+        guard state == .idle || state == .error else {
+            return
+        }
+        guard let recordedClip = pendingRetryClip else {
+            return
+        }
+        guard FileManager.default.fileExists(atPath: recordedClip.fileURL.path) else {
+            clearPendingRetryClip(deleteFile: false)
+            setError("Last recording file is no longer available.")
+            return
         }
 
+        await transcribeRecordedClip(
+            recordedClip,
+            diagnosticsEnabled: settings.performanceDiagnosticsEnabled,
+            flowStart: DispatchTime.now(),
+            initialTiming: WorkflowTiming(),
+            transcribingMessage: "Retrying last recording..."
+        )
+    }
+
+    private func transcribeRecordedClip(
+        _ recordedClip: RecordedClip,
+        diagnosticsEnabled: Bool,
+        flowStart: DispatchTime,
+        initialTiming: WorkflowTiming,
+        transcribingMessage: String
+    ) async {
+        var timing = initialTiming
+        setState(.transcribing, message: transcribingMessage)
         let prepStart = DispatchTime.now()
         let apiKey = settings.apiKey
         let model = settings.model
@@ -212,6 +251,7 @@ final class AppCoordinator: NSObject {
             timing.result = "missing_api_key"
             timing.totalMilliseconds = millisecondsSince(flowStart)
             logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
+            preserveRecordingForRetry(recordedClip)
             setError("Missing Groq API key. Open Settings.")
             return
         }
@@ -246,6 +286,7 @@ final class AppCoordinator: NSObject {
                 timing.result = "empty_transcript_after_filtering"
                 timing.totalMilliseconds = millisecondsSince(flowStart)
                 logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
+                preserveRecordingForRetry(recordedClip)
                 setError("No speech detected (or fully removed by filters).")
                 return
             }
@@ -256,6 +297,7 @@ final class AppCoordinator: NSObject {
                 timing.result = "clipboard_copy_failed"
                 timing.totalMilliseconds = millisecondsSince(flowStart)
                 logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
+                preserveRecordingForRetry(recordedClip)
                 setError("Failed to copy transcript.")
                 return
             }
@@ -271,8 +313,7 @@ final class AppCoordinator: NSObject {
                     logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
                     finalizeSuccessfulTranscriptDelivery(
                         text: text,
-                        fileURL: recordedClip.fileURL,
-                        recorderReportedDurationSeconds: recordedClip.recorderReportedDurationSeconds,
+                        recordedClip: recordedClip,
                         statusMessage: "Pasted transcript (\(text.count) chars)."
                     )
                 } else {
@@ -282,8 +323,7 @@ final class AppCoordinator: NSObject {
                     logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
                     finalizeSuccessfulTranscriptDelivery(
                         text: text,
-                        fileURL: recordedClip.fileURL,
-                        recorderReportedDurationSeconds: recordedClip.recorderReportedDurationSeconds,
+                        recordedClip: recordedClip,
                         statusMessage: "Copied transcript. Auto-paste needs Post Keyboard Events permission.",
                         transientSeconds: 8
                     )
@@ -294,8 +334,7 @@ final class AppCoordinator: NSObject {
                 logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
                 finalizeSuccessfulTranscriptDelivery(
                     text: text,
-                    fileURL: recordedClip.fileURL,
-                    recorderReportedDurationSeconds: recordedClip.recorderReportedDurationSeconds,
+                    recordedClip: recordedClip,
                     statusMessage: "Copied transcript (\(text.count) chars)."
                 )
             }
@@ -303,6 +342,7 @@ final class AppCoordinator: NSObject {
             timing.result = "transcription_failed"
             timing.totalMilliseconds = millisecondsSince(flowStart)
             logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
+            preserveRecordingForRetry(recordedClip)
             setError("Transcription failed: \(error.localizedDescription)")
         }
     }
@@ -322,18 +362,19 @@ final class AppCoordinator: NSObject {
 
     private func finalizeSuccessfulTranscriptDelivery(
         text: String,
-        fileURL: URL,
-        recorderReportedDurationSeconds: TimeInterval,
+        recordedClip: RecordedClip,
         statusMessage: String,
         transientSeconds: TimeInterval? = 4
     ) {
+        clearPendingRetryClipIfMatching(recordedClip, deleteFile: false)
         setIdleStatus(statusMessage, transientSeconds: transientSeconds)
-        let fileMeasuredDurationSeconds = recorder.recordedFileDuration(for: fileURL)
+        let fileMeasuredDurationSeconds = recorder.recordedFileDuration(for: recordedClip.fileURL)
         dictationStats.recordSuccessfulSession(
             text: text,
             fileMeasuredDurationSeconds: fileMeasuredDurationSeconds,
-            recorderReportedDurationSeconds: recorderReportedDurationSeconds
+            recorderReportedDurationSeconds: recordedClip.recorderReportedDurationSeconds
         )
+        try? FileManager.default.removeItem(at: recordedClip.fileURL)
         refreshStatsMenu()
     }
 
@@ -356,7 +397,7 @@ final class AppCoordinator: NSObject {
             guard let self, self.state == .idle else {
                 return
             }
-            self.setState(.idle, message: "Idle: tap Option to record.")
+            self.setState(.idle, message: self.defaultIdleMessage)
         }
         idleResetWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + transientSeconds, execute: work)
@@ -370,7 +411,7 @@ final class AppCoordinator: NSObject {
                 return
             }
             if self.state == .error {
-                self.setState(.idle, message: "Idle: tap Option to record.")
+                self.setState(.idle, message: self.defaultIdleMessage)
             }
         }
         idleResetWorkItem = work
@@ -404,6 +445,17 @@ final class AppCoordinator: NSObject {
 
     private func refreshMenuBarStatus() {
         menuBar.updateStatus(message: statusMessage, state: menuBarStatusState)
+        menuBar.updateRetryControls(
+            isAvailable: pendingRetryClip != nil,
+            isEnabled: pendingRetryClip != nil && (state == .idle || state == .error)
+        )
+    }
+
+    private var defaultIdleMessage: String {
+        if pendingRetryClip != nil {
+            return "Idle: retry last recording or tap Option to record."
+        }
+        return "Idle: tap Option to record."
     }
 
     private var menuBarStatusState: MenuBarStatusState {
@@ -476,6 +528,22 @@ final class AppCoordinator: NSObject {
 
     @objc private func testPermissionsFromMenu() {
         showPermissionsDialog(promptForDialogs: true)
+    }
+
+    @objc private func retryLastRecordingFromMenu() {
+        Task { [weak self] in
+            await self?.retryLastRecordingFlow()
+        }
+    }
+
+    @objc private func discardLastRecordingFromMenu() {
+        guard state == .idle || state == .error else {
+            return
+        }
+        guard clearPendingRetryClip(deleteFile: true) else {
+            return
+        }
+        setIdleStatus("Discarded last recording.")
     }
 
     private func showPermissionsDialog(promptForDialogs: Bool) {
@@ -559,5 +627,36 @@ final class AppCoordinator: NSObject {
         ) {
             openSettingsFromMenu()
         }
+    }
+
+    @discardableResult
+    private func clearPendingRetryClip(deleteFile: Bool) -> Bool {
+        guard let pendingRetryClip else {
+            return false
+        }
+        self.pendingRetryClip = nil
+        if deleteFile {
+            try? FileManager.default.removeItem(at: pendingRetryClip.fileURL)
+        }
+        refreshMenuBarStatus()
+        return true
+    }
+
+    private func clearPendingRetryClipIfMatching(_ recordedClip: RecordedClip, deleteFile: Bool) {
+        guard pendingRetryClip?.fileURL == recordedClip.fileURL else {
+            return
+        }
+        _ = clearPendingRetryClip(deleteFile: deleteFile)
+    }
+
+    private func preserveRecordingForRetry(_ recordedClip: RecordedClip) {
+        guard FileManager.default.fileExists(atPath: recordedClip.fileURL.path) else {
+            return
+        }
+        if pendingRetryClip?.fileURL != recordedClip.fileURL {
+            clearPendingRetryClip(deleteFile: true)
+        }
+        pendingRetryClip = recordedClip
+        refreshMenuBarStatus()
     }
 }

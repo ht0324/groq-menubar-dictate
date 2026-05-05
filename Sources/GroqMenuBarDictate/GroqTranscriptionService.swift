@@ -58,7 +58,7 @@ actor GroqTranscriptionService {
         language: String?,
         prompt: String?,
         maxAudioBytes: Int,
-        timeout: TimeInterval = 30,
+        timeout: TimeInterval = 20,
         collectMetrics: Bool = false
     ) async throws -> TranscriptionResponse {
         guard fileManager.fileExists(atPath: fileURL.path) else {

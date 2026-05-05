@@ -45,6 +45,7 @@ final class GroqTranscriptionServiceTests: XCTestCase {
         XCTAssertEqual(response.text, "hello world")
         let request = try XCTUnwrap(requestCapture.recordedRequest)
         XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.timeoutInterval, 20)
         XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "text/plain")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-key")
         let contentLength = try XCTUnwrap(Int(try XCTUnwrap(request.value(forHTTPHeaderField: "Content-Length"))))
@@ -78,6 +79,7 @@ final class GroqTranscriptionServiceTests: XCTestCase {
                 mimeType: "audio/m4a"
             )
         )
+        defer { try? fileManager.removeItem(at: uploadFile.fileURL) }
 
         let body = try String(contentsOf: uploadFile.fileURL, encoding: .utf8)
         XCTAssertEqual(Int64(body.utf8.count), uploadFile.contentLength)
