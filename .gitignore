@@ -10,3 +10,5 @@ DerivedData/
 # Local/operator-only files
 /AGENTS.md
 /testfile.m4a
+/.tmp-swiftpm-cache
+/dist
