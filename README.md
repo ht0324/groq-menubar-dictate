@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/groq-menubar-dictate-icon.svg" alt="Groq MenuBar Dictate icon" width="128" height="128">
+  <img src="assets/groq-menubar-dictate-preview.png" alt="Groq MenuBar Dictate menu bar screenshot" width="180" height="180">
 </p>
 
 <h1 align="center">Groq MenuBar Dictate</h1>
