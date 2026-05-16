@@ -100,6 +100,7 @@ final class MenuBarController {
         NSApp.activate(ignoringOtherApps: true)
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
+        controller.clearInitialFocus()
     }
 
     func showPermissionSummary(_ lines: [String]) {

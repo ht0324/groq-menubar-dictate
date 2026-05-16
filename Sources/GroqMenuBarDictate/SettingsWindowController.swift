@@ -90,7 +90,7 @@ final class SettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Groq Dictation Settings"
+        window.title = "Settings"
         super.init(window: window)
         setupUI(snapshot: snapshot)
         window.center()
@@ -106,6 +106,7 @@ final class SettingsWindowController: NSWindowController {
             return
         }
 
+        configureAPIKeyField()
         apiKeyField.stringValue = snapshot.apiKey
         modelField.stringValue = snapshot.model
         modelField.placeholderString = "whisper-large-v3-turbo"
@@ -241,6 +242,22 @@ final class SettingsWindowController: NSWindowController {
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -20),
         ])
+    }
+
+    func clearInitialFocus() {
+        window?.makeFirstResponder(nil)
+    }
+
+    private func configureAPIKeyField() {
+        apiKeyField.maximumNumberOfLines = 1
+        apiKeyField.lineBreakMode = .byClipping
+
+        if let cell = apiKeyField.cell as? NSSecureTextFieldCell {
+            cell.usesSingleLineMode = true
+            cell.wraps = false
+            cell.isScrollable = true
+            cell.lineBreakMode = .byClipping
+        }
     }
 
     private func makeSection(title: String, arrangedSubviews: [NSView]) -> NSView {
