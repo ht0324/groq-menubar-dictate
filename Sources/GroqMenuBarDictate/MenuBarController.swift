@@ -26,6 +26,7 @@ final class MenuBarController {
     private let retrySeparator = NSMenuItem.separator()
     private let statsMenu = NSMenu(title: "Stats")
     private let statsMenuItem = NSMenuItem(title: "Stats", action: nil, keyEquivalent: "")
+    private let versionMenuItem = NSMenuItem(title: AppVersionInfo.current.menuTitle, action: nil, keyEquivalent: "")
 
     private var settingsWindowController: SettingsWindowController?
 
@@ -156,6 +157,9 @@ final class MenuBarController {
         menu.addItem(menuItem(title: "Test Permissions", action: actions.testPermissions))
         statsMenuItem.submenu = statsMenu
         menu.addItem(statsMenuItem)
+        menu.addItem(.separator())
+        versionMenuItem.isEnabled = false
+        menu.addItem(versionMenuItem)
         menu.addItem(.separator())
         menu.addItem(menuItem(title: "Quit", action: actions.quit, keyEquivalent: "q"))
 

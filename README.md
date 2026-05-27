@@ -83,6 +83,20 @@ Ad-hoc signing is still available for one-off local builds, but it may reset mac
 GROQ_DICTATE_ALLOW_ADHOC=1 ./scripts/install_to_applications.sh
 ```
 
+Each installed bundle is stamped from git before signing:
+
+- `CFBundleShortVersionString`: the exact `vX.Y.Z` git tag at `HEAD`, the latest semver tag if `HEAD` is ahead of a tag, or `0.0.0` when the repo has no release tags yet.
+- `CFBundleVersion`: the git commit count.
+- Extra bundle metadata: commit SHA, branch, dirty/clean state, build date, and a display string shown in the app menu.
+
+To build a shareable zip without a paid Apple Developer account, use the local signing identity and export in one command:
+
+```bash
+./scripts/export_release_zip.sh
+```
+
+The zip lands in `dist/` with the version, build number, commit, and dirty state in the filename.
+
 ## Settings And Text Cleanup
 
 The Settings window lets you configure:
