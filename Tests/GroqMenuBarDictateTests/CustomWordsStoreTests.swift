@@ -5,15 +5,15 @@ final class CustomWordsStoreTests: XCTestCase {
     func testParseWordsRemovesCommentsAndDedupesCaseInsensitively() {
         let raw = """
         # comment
-        Codex
-        codex
-        OpenClaw
+        Acme
+        acme
+        Widget Pro
 
-        Hun Tae
+        Launch Mode
         # another
         """
         let parsed = CustomWordsStore.parseWords(from: raw, limit: 80)
-        XCTAssertEqual(parsed, ["Codex", "OpenClaw", "Hun Tae"])
+        XCTAssertEqual(parsed, ["Acme", "Widget Pro", "Launch Mode"])
     }
 
     func testParseWordsRespectsLimit() {
@@ -45,5 +45,20 @@ final class CustomWordsStoreTests: XCTestCase {
         try fileManager.setAttributes([.modificationDate: Date(timeIntervalSince1970: 200)], ofItemAtPath: wordsURL.path)
 
         XCTAssertEqual(store.loadWords(limit: 10), ["beta"])
+    }
+
+    func testSeedFileStartsWithoutCustomWords() throws {
+        let fileManager = FileManager.default
+        let tempFolder = fileManager.temporaryDirectory
+            .appendingPathComponent("CustomWordsStoreSeedTests-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: tempFolder, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempFolder) }
+
+        let wordsURL = tempFolder.appendingPathComponent("custom-words.txt", isDirectory: false)
+        let store = CustomWordsStore(fileManager: fileManager, wordsFileURL: wordsURL)
+
+        try store.ensureSeedFileExists()
+
+        XCTAssertEqual(store.loadWords(limit: 10), [])
     }
 }

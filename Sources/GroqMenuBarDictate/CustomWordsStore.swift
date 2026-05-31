@@ -13,26 +13,9 @@ final class CustomWordsStore {
         self.lineList = LineListFileStore(
             fileManager: fileManager,
             fileURL: resolvedURL,
-            initialContents: Self.seedWords.joined(separator: "\n") + "\n"
+            initialContents: Self.initialFileContents
         )
     }
-
-    static let seedWords: [String] = [
-        "Codex",
-        "OpenClaw",
-        "Hun Tae",
-        "WHOOP",
-        "claude",
-        "Iris",
-        "Groq",
-        "cron job",
-        "Miri",
-        "SOUL.md",
-        "USER.md",
-        "AGENTS.md",
-        "ElevenLabs",
-        "skill",
-    ]
 
     func ensureSeedFileExists() throws {
         try lineList.ensureFileExists()
@@ -59,5 +42,13 @@ final class CustomWordsStore {
 
     static func parseWords(from raw: String, limit: Int) -> [String] {
         LineListFileStore.parseEntries(from: raw, limit: limit)
+    }
+
+    private static var initialFileContents: String {
+        """
+        # One custom word or phrase per line.
+        # These entries are used as transcription spelling hints when spoken.
+
+        """
     }
 }

@@ -16,7 +16,7 @@ final class AudioDeviceRoutingPolicyTests: XCTestCase {
     func testShouldAvoidAutomaticActivationForAirPodsNameFallback() {
         XCTAssertTrue(
             AudioDeviceRoutingPolicy.shouldAvoidAutomaticActivation(
-                name: "Hun Tae's AirPods Pro",
+                name: "Example AirPods Pro",
                 uid: "BC-80-4E-EF-61-DF:input",
                 transportType: nil
             )
