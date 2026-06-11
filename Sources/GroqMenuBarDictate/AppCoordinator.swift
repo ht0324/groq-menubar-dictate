@@ -40,6 +40,11 @@ final class AppCoordinator: NSObject {
     private var statusMessage = "Idle: tap Option to record."
     private var idleResetWorkItem: DispatchWorkItem?
     private var pendingRetryClip: RecordedClip?
+    private var connectionKeepWarmTask: Task<Void, Never>?
+
+    /// Shorter than typical server/client keep-alive idle timeouts so the
+    /// prewarmed connection survives recordings longer than one ping.
+    private static let connectionKeepWarmInterval: TimeInterval = 45
 
     private struct WorkflowTiming {
         var audioFileSizeBytes: Int64?
@@ -177,9 +182,6 @@ final class AppCoordinator: NSObject {
 
         do {
             try recorder.startRecording(mode: settings.microphoneInputMode)
-            Task { [transcriber] in
-                await transcriber.prewarmConnection()
-            }
             clearPendingRetryClip(deleteFile: true)
             let hasListen = ensureEventPermission(.listen)
             if hasListen {
@@ -419,9 +421,27 @@ final class AppCoordinator: NSObject {
         idleResetWorkItem = nil
         optionTapRecognizer.setStopOnOptionPressEnabled(state == .recording)
         optionTapRecognizer.setEscapeInterceptionEnabled(state == .recording)
+        setConnectionKeepWarmEnabled(state == .recording)
         self.state = state
         self.statusMessage = message
         refreshMenuBarStatus()
+    }
+
+    private func setConnectionKeepWarmEnabled(_ enabled: Bool) {
+        guard enabled else {
+            connectionKeepWarmTask?.cancel()
+            connectionKeepWarmTask = nil
+            return
+        }
+        guard connectionKeepWarmTask == nil else {
+            return
+        }
+        connectionKeepWarmTask = Task { [transcriber] in
+            while !Task.isCancelled {
+                await transcriber.prewarmConnection()
+                try? await Task.sleep(nanoseconds: UInt64(Self.connectionKeepWarmInterval * 1_000_000_000))
+            }
+        }
     }
 
     private func setIdleStatus(_ message: String, transientSeconds: TimeInterval? = 4) {
