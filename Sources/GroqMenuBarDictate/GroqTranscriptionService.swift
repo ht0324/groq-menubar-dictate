@@ -39,6 +39,7 @@ actor GroqTranscriptionService {
     private let urlSession: URLSession
     private let fileManager: FileManager
     private let multipartBuilder: MultipartFormDataUploadBuilder
+    private var prewarmTask: Task<Void, Never>?
 
     init(
         endpoint: URL = AppConfig.defaultGroqEndpoint,
@@ -49,6 +50,34 @@ actor GroqTranscriptionService {
         self.urlSession = urlSession
         self.fileManager = fileManager
         self.multipartBuilder = MultipartFormDataUploadBuilder(fileManager: fileManager)
+    }
+
+    /// Opens a connection to the transcription host so the DNS + TCP + TLS
+    /// handshake overlaps with recording instead of delaying the upload.
+    func prewarmConnection(timeout: TimeInterval = 5) {
+        guard prewarmTask == nil else {
+            return
+        }
+        guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: true) else {
+            return
+        }
+        components.path = "/"
+        components.query = nil
+        guard let prewarmURL = components.url else {
+            return
+        }
+
+        var request = URLRequest(url: prewarmURL)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = timeout
+        prewarmTask = Task { [urlSession] in
+            _ = try? await urlSession.data(for: request)
+            await self.clearPrewarmTask()
+        }
+    }
+
+    private func clearPrewarmTask() {
+        prewarmTask = nil
     }
 
     func transcribe(

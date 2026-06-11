@@ -54,6 +54,33 @@ final class TempAudioCleanupServiceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: recentURL.path))
     }
 
+    func testCleanupStaleFilesRemovesOldMultipartBodyFiles() throws {
+        let fixture = try TempDirectoryFixture()
+        let now = Date()
+        let staleURL = try fixture.createFile(
+            named: "groq-multipart-old",
+            modifiedAt: now.addingTimeInterval(-(maxAge + 60))
+        )
+        let recentURL = try fixture.createFile(
+            named: "groq-multipart-recent",
+            modifiedAt: now.addingTimeInterval(-60)
+        )
+
+        let service = TempAudioCleanupService(
+            fileManager: .default,
+            temporaryDirectory: fixture.url,
+            nowProvider: { now }
+        )
+
+        let report = service.cleanupStaleFiles(olderThan: maxAge)
+
+        XCTAssertEqual(report.scannedCount, 2)
+        XCTAssertEqual(report.removedCount, 1)
+        XCTAssertEqual(report.failedCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recentURL.path))
+    }
+
     func testCleanupStaleFilesKeepsNonMatchingFiles() throws {
         let fixture = try TempDirectoryFixture()
         let now = Date()

@@ -36,6 +36,7 @@ final class AppCoordinator: NSObject {
     )
 
     private var state: State = .idle
+    private var isStartingRecording = false
     private var statusMessage = "Idle: tap Option to record."
     private var idleResetWorkItem: DispatchWorkItem?
     private var pendingRetryClip: RecordedClip?
@@ -133,8 +134,14 @@ final class AppCoordinator: NSObject {
     }
 
     private func startRecordingFlow() async {
-        guard state == .idle || state == .error else {
+        guard state == .idle || state == .error, !isStartingRecording else {
             return
+        }
+        // Guards against a second tap arriving while the microphone permission
+        // request below suspends this flow with state still .idle.
+        isStartingRecording = true
+        defer {
+            isStartingRecording = false
         }
 
         let status = permissions.microphoneAuthorizationStatus()
@@ -157,6 +164,9 @@ final class AppCoordinator: NSObject {
 
         do {
             try recorder.startRecording(mode: settings.microphoneInputMode)
+            Task { [transcriber] in
+                await transcriber.prewarmConnection()
+            }
             clearPendingRetryClip(deleteFile: true)
             let hasListen = ensureEventPermission(.listen)
             if hasListen {
