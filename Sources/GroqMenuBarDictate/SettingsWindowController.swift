@@ -149,6 +149,16 @@ final class SettingsWindowController: NSWindowController {
         title.alignment = .left
         title.font = NSFont.boldSystemFont(ofSize: 17)
 
+        let version = NSTextField(labelWithString: AppVersionInfo.current.menuTitle)
+        version.alignment = .left
+        version.font = NSFont.systemFont(ofSize: 12)
+        version.textColor = .tertiaryLabelColor
+
+        let headerStack = NSStackView(views: [title, version])
+        headerStack.orientation = .vertical
+        headerStack.alignment = .leading
+        headerStack.spacing = 4
+
         let hint = NSTextField(
             wrappingLabelWithString: "Tap Option once to start recording and again to stop. Grant Microphone and Input Monitoring once during setup."
         )
@@ -158,7 +168,7 @@ final class SettingsWindowController: NSWindowController {
         hint.translatesAutoresizingMaskIntoConstraints = false
         hint.widthAnchor.constraint(equalToConstant: 580).isActive = true
 
-        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(headerStack)
         stack.addArrangedSubview(hint)
 
         let testPermissionsButton = NSButton(title: "Test Permissions", target: self, action: #selector(testPermissionsTapped))
