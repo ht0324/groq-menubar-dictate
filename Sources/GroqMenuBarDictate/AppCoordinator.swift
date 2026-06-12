@@ -42,11 +42,24 @@ final class AppCoordinator: NSObject {
     private var pendingRetryClip: RecordedClip?
 
     private struct WorkflowTiming {
+        var audioFileSizeBytes: Int64?
+        var recordingDurationSeconds: TimeInterval?
+        var uploadBodySizeBytes: Int64?
         var stopRecordingMilliseconds: Double = 0
         var promptPreparationMilliseconds: Double = 0
         var transcriptionMilliseconds: Double = 0
         var uploadPreparationMilliseconds: Double = 0
         var networkRoundTripMilliseconds: Double = 0
+        var taskIntervalMilliseconds: Double?
+        var fetchToResponseEndMilliseconds: Double?
+        var domainLookupMilliseconds: Double?
+        var tcpConnectionMilliseconds: Double?
+        var tlsHandshakeMilliseconds: Double?
+        var requestUploadMilliseconds: Double?
+        var timeToFirstByteAfterUploadMilliseconds: Double?
+        var responseDownloadMilliseconds: Double?
+        var networkProtocolName: String?
+        var isReusedConnection: Bool?
         var responseParseMilliseconds: Double = 0
         var postProcessingMilliseconds: Double = 0
         var clipboardMilliseconds: Double = 0
@@ -241,6 +254,8 @@ final class AppCoordinator: NSObject {
         transcribingMessage: String
     ) async {
         var timing = initialTiming
+        timing.audioFileSizeBytes = audioFileSizeBytes(for: recordedClip.fileURL)
+        timing.recordingDurationSeconds = recordedClip.recorderReportedDurationSeconds
         setState(.transcribing, message: transcribingMessage)
         let prepStart = DispatchTime.now()
         let apiKey = settings.apiKey
@@ -276,9 +291,23 @@ final class AppCoordinator: NSObject {
             )
             timing.transcriptionMilliseconds = millisecondsSince(transcribeStart)
             if let metrics = response.metrics {
+                timing.audioFileSizeBytes = Int64(metrics.audioFileSizeBytes)
+                timing.uploadBodySizeBytes = metrics.uploadBodySizeBytes
                 timing.uploadPreparationMilliseconds = metrics.uploadPreparationMilliseconds
                 timing.networkRoundTripMilliseconds = metrics.networkRoundTripMilliseconds
                 timing.responseParseMilliseconds = metrics.responseParseMilliseconds
+                if let taskMetrics = metrics.urlSessionTaskMetrics {
+                    timing.taskIntervalMilliseconds = taskMetrics.taskIntervalMilliseconds
+                    timing.fetchToResponseEndMilliseconds = taskMetrics.fetchToResponseEndMilliseconds
+                    timing.domainLookupMilliseconds = taskMetrics.domainLookupMilliseconds
+                    timing.tcpConnectionMilliseconds = taskMetrics.tcpConnectionMilliseconds
+                    timing.tlsHandshakeMilliseconds = taskMetrics.tlsHandshakeMilliseconds
+                    timing.requestUploadMilliseconds = taskMetrics.requestUploadMilliseconds
+                    timing.timeToFirstByteAfterUploadMilliseconds = taskMetrics.timeToFirstByteAfterUploadMilliseconds
+                    timing.responseDownloadMilliseconds = taskMetrics.responseDownloadMilliseconds
+                    timing.networkProtocolName = taskMetrics.networkProtocolName
+                    timing.isReusedConnection = taskMetrics.isReusedConnection
+                }
             }
 
             let postProcessingStart = DispatchTime.now()
@@ -429,13 +458,31 @@ final class AppCoordinator: NSObject {
         Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
     }
 
+    private func audioFileSizeBytes(for fileURL: URL) -> Int64? {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+        return (attributes?[.size] as? NSNumber)?.int64Value
+    }
+
     private func logWorkflowTimingIfEnabled(_ timing: WorkflowTiming, diagnosticsEnabled: Bool) {
         guard diagnosticsEnabled else {
             return
         }
         let pasteMilliseconds = timing.pasteMilliseconds ?? -1
+        let audioFileSizeBytes = timing.audioFileSizeBytes ?? -1
+        let recordingDurationSeconds = timing.recordingDurationSeconds ?? -1
+        let uploadBodySizeBytes = timing.uploadBodySizeBytes ?? -1
+        let taskIntervalMilliseconds = timing.taskIntervalMilliseconds ?? -1
+        let fetchToResponseEndMilliseconds = timing.fetchToResponseEndMilliseconds ?? -1
+        let domainLookupMilliseconds = timing.domainLookupMilliseconds ?? -1
+        let tcpConnectionMilliseconds = timing.tcpConnectionMilliseconds ?? -1
+        let tlsHandshakeMilliseconds = timing.tlsHandshakeMilliseconds ?? -1
+        let requestUploadMilliseconds = timing.requestUploadMilliseconds ?? -1
+        let timeToFirstByteAfterUploadMilliseconds = timing.timeToFirstByteAfterUploadMilliseconds ?? -1
+        let responseDownloadMilliseconds = timing.responseDownloadMilliseconds ?? -1
+        let networkProtocolName = timing.networkProtocolName ?? "unknown"
+        let reusedConnection = timing.isReusedConnection.map { $0 ? "true" : "false" } ?? "unknown"
         logger.info(
-            "Workflow timing result=\(timing.result, privacy: .public) total_ms=\(timing.totalMilliseconds, format: .fixed(precision: 1)) stop_ms=\(timing.stopRecordingMilliseconds, format: .fixed(precision: 1)) prep_ms=\(timing.promptPreparationMilliseconds, format: .fixed(precision: 1)) transcribe_ms=\(timing.transcriptionMilliseconds, format: .fixed(precision: 1)) upload_prep_ms=\(timing.uploadPreparationMilliseconds, format: .fixed(precision: 1)) network_ms=\(timing.networkRoundTripMilliseconds, format: .fixed(precision: 1)) parse_ms=\(timing.responseParseMilliseconds, format: .fixed(precision: 1)) post_ms=\(timing.postProcessingMilliseconds, format: .fixed(precision: 1)) clipboard_ms=\(timing.clipboardMilliseconds, format: .fixed(precision: 1)) paste_ms=\(pasteMilliseconds, format: .fixed(precision: 1))"
+            "Workflow timing result=\(timing.result, privacy: .public) audio_bytes=\(audioFileSizeBytes, privacy: .public) recording_s=\(recordingDurationSeconds, format: .fixed(precision: 3)) upload_body_bytes=\(uploadBodySizeBytes, privacy: .public) total_ms=\(timing.totalMilliseconds, format: .fixed(precision: 1)) stop_ms=\(timing.stopRecordingMilliseconds, format: .fixed(precision: 1)) prep_ms=\(timing.promptPreparationMilliseconds, format: .fixed(precision: 1)) transcribe_ms=\(timing.transcriptionMilliseconds, format: .fixed(precision: 1)) upload_prep_ms=\(timing.uploadPreparationMilliseconds, format: .fixed(precision: 1)) network_ms=\(timing.networkRoundTripMilliseconds, format: .fixed(precision: 1)) task_interval_ms=\(taskIntervalMilliseconds, format: .fixed(precision: 1)) fetch_to_response_end_ms=\(fetchToResponseEndMilliseconds, format: .fixed(precision: 1)) dns_ms=\(domainLookupMilliseconds, format: .fixed(precision: 1)) tcp_ms=\(tcpConnectionMilliseconds, format: .fixed(precision: 1)) tls_ms=\(tlsHandshakeMilliseconds, format: .fixed(precision: 1)) request_upload_ms=\(requestUploadMilliseconds, format: .fixed(precision: 1)) first_byte_wait_ms=\(timeToFirstByteAfterUploadMilliseconds, format: .fixed(precision: 1)) response_download_ms=\(responseDownloadMilliseconds, format: .fixed(precision: 1)) reused_connection=\(reusedConnection, privacy: .public) network_protocol=\(networkProtocolName, privacy: .public) parse_ms=\(timing.responseParseMilliseconds, format: .fixed(precision: 1)) post_ms=\(timing.postProcessingMilliseconds, format: .fixed(precision: 1)) clipboard_ms=\(timing.clipboardMilliseconds, format: .fixed(precision: 1)) paste_ms=\(pasteMilliseconds, format: .fixed(precision: 1))"
         )
     }
 

@@ -1,9 +1,25 @@
 import Foundation
 
 struct TranscriptionMetrics {
+    let audioFileSizeBytes: Int
+    let uploadBodySizeBytes: Int64
     let uploadPreparationMilliseconds: Double
     let networkRoundTripMilliseconds: Double
     let responseParseMilliseconds: Double
+    let urlSessionTaskMetrics: TranscriptionURLSessionTaskMetrics?
+}
+
+struct TranscriptionURLSessionTaskMetrics: Sendable {
+    let taskIntervalMilliseconds: Double
+    let fetchToResponseEndMilliseconds: Double?
+    let domainLookupMilliseconds: Double?
+    let tcpConnectionMilliseconds: Double?
+    let tlsHandshakeMilliseconds: Double?
+    let requestUploadMilliseconds: Double?
+    let timeToFirstByteAfterUploadMilliseconds: Double?
+    let responseDownloadMilliseconds: Double?
+    let networkProtocolName: String?
+    let isReusedConnection: Bool?
 }
 
 struct TranscriptionResponse {
@@ -72,7 +88,7 @@ actor GroqTranscriptionService {
         request.timeoutInterval = timeout
         prewarmTask = Task { [urlSession] in
             _ = try? await urlSession.data(for: request)
-            await self.clearPrewarmTask()
+            self.clearPrewarmTask()
         }
     }
 
@@ -145,8 +161,13 @@ actor GroqTranscriptionService {
 
         let uploadPreparationMilliseconds = millisecondsSince(uploadPreparationStart)
 
+        let taskMetricsCollector = collectMetrics ? URLSessionTaskMetricsCollector() : nil
         let networkStart = collectMetrics ? DispatchTime.now() : nil
-        let (data, response) = try await urlSession.upload(for: request, fromFile: multipartBodyFile.fileURL)
+        let (data, response) = try await urlSession.upload(
+            for: request,
+            fromFile: multipartBodyFile.fileURL,
+            delegate: taskMetricsCollector
+        )
         let networkRoundTripMilliseconds = millisecondsSince(networkStart)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -165,9 +186,12 @@ actor GroqTranscriptionService {
         let metrics: TranscriptionMetrics?
         if collectMetrics {
             metrics = TranscriptionMetrics(
+                audioFileSizeBytes: fileSizeBytes,
+                uploadBodySizeBytes: multipartBodyFile.contentLength,
                 uploadPreparationMilliseconds: uploadPreparationMilliseconds,
                 networkRoundTripMilliseconds: networkRoundTripMilliseconds,
-                responseParseMilliseconds: responseParseMilliseconds
+                responseParseMilliseconds: responseParseMilliseconds,
+                urlSessionTaskMetrics: Self.makeTaskMetrics(from: taskMetricsCollector?.metrics)
             )
         } else {
             metrics = nil
@@ -247,5 +271,52 @@ actor GroqTranscriptionService {
             return 0
         }
         return Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+    }
+
+    private static func makeTaskMetrics(from metrics: URLSessionTaskMetrics?) -> TranscriptionURLSessionTaskMetrics? {
+        guard let metrics else {
+            return nil
+        }
+        let transaction = metrics.transactionMetrics.last { $0.responseEndDate != nil }
+            ?? metrics.transactionMetrics.last
+
+        return TranscriptionURLSessionTaskMetrics(
+            taskIntervalMilliseconds: metrics.taskInterval.duration * 1_000,
+            fetchToResponseEndMilliseconds: milliseconds(from: transaction?.fetchStartDate, to: transaction?.responseEndDate),
+            domainLookupMilliseconds: milliseconds(from: transaction?.domainLookupStartDate, to: transaction?.domainLookupEndDate),
+            tcpConnectionMilliseconds: milliseconds(from: transaction?.connectStartDate, to: transaction?.connectEndDate),
+            tlsHandshakeMilliseconds: milliseconds(from: transaction?.secureConnectionStartDate, to: transaction?.secureConnectionEndDate),
+            requestUploadMilliseconds: milliseconds(from: transaction?.requestStartDate, to: transaction?.requestEndDate),
+            timeToFirstByteAfterUploadMilliseconds: milliseconds(from: transaction?.requestEndDate, to: transaction?.responseStartDate),
+            responseDownloadMilliseconds: milliseconds(from: transaction?.responseStartDate, to: transaction?.responseEndDate),
+            networkProtocolName: transaction?.networkProtocolName,
+            isReusedConnection: transaction?.isReusedConnection
+        )
+    }
+
+    private static func milliseconds(from start: Date?, to end: Date?) -> Double? {
+        guard let start, let end else {
+            return nil
+        }
+        return max(0, end.timeIntervalSince(start) * 1_000)
+    }
+}
+
+private final class URLSessionTaskMetricsCollector: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var collectedMetrics: URLSessionTaskMetrics?
+
+    var metrics: URLSessionTaskMetrics? {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        return collectedMetrics
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        lock.lock()
+        collectedMetrics = metrics
+        lock.unlock()
     }
 }

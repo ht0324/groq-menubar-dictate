@@ -16,14 +16,27 @@ enum LaunchAtLoginError: LocalizedError {
 
 @MainActor
 final class LaunchAtLoginService {
+    typealias LaunchctlRunner = (_ args: [String], _ allowFailure: Bool) throws -> Void
+
     let label = "com.huntae.groq-menubar-dictate"
     private let fileManager: FileManager
+    private let customPlistURL: URL?
+    private let launchctlRunner: LaunchctlRunner?
 
-    init(fileManager: FileManager = .default) {
+    init(
+        fileManager: FileManager = .default,
+        plistURL: URL? = nil,
+        launchctlRunner: LaunchctlRunner? = nil
+    ) {
         self.fileManager = fileManager
+        self.customPlistURL = plistURL
+        self.launchctlRunner = launchctlRunner
     }
 
     var plistURL: URL {
+        if let customPlistURL {
+            return customPlistURL
+        }
         let base = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent("Library", isDirectory: true)
             .appendingPathComponent("LaunchAgents", isDirectory: true)
@@ -35,11 +48,43 @@ final class LaunchAtLoginService {
     }
 
     func setEnabled(_ enabled: Bool, executablePath: String) throws {
+        guard needsUpdate(enabled: enabled, executablePath: executablePath) else {
+            return
+        }
+
         if enabled {
             try enable(executablePath: executablePath)
         } else {
             try disable()
         }
+    }
+
+    func needsUpdate(enabled: Bool, executablePath: String) -> Bool {
+        if enabled {
+            guard isEnabled else {
+                return true
+            }
+            let resolvedExecutablePath = executablePath.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !resolvedExecutablePath.isEmpty else {
+                return true
+            }
+            return configuredExecutablePath != resolvedExecutablePath
+        }
+
+        return isEnabled
+    }
+
+    private var configuredExecutablePath: String? {
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
+              let dictionary = plist as? [String: Any],
+              let arguments = dictionary["ProgramArguments"] as? [String],
+              let executablePath = arguments.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !executablePath.isEmpty
+        else {
+            return nil
+        }
+        return executablePath
     }
 
     private func enable(executablePath: String) throws {
@@ -78,6 +123,11 @@ final class LaunchAtLoginService {
     }
 
     private func runLaunchctl(args: [String], allowFailure: Bool) throws {
+        if let launchctlRunner {
+            try launchctlRunner(args, allowFailure)
+            return
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         process.arguments = args

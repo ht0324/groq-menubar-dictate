@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -12,7 +13,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 @main
 struct GroqMenuBarDictateApp {
-    static func main() {
+    @MainActor
+    static func main() async {
+        if LatencyProbeCommand.shouldRun(arguments: CommandLine.arguments) {
+            exit(await LatencyProbeCommand.run(arguments: CommandLine.arguments))
+        }
+
         let singleInstanceGuard = SingleInstanceGuard(lockName: "com.huntae.groq-menubar-dictate")
         guard singleInstanceGuard.acquireLock() else {
             exit(0)

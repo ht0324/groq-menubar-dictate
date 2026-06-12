@@ -2,6 +2,7 @@ import Foundation
 
 enum AppConfig {
     static let serviceName = "groq-menubar-dictate"
+    static let bundleIdentifier = "com.huntae.groq-menubar-dictate"
     static let defaultModel = "whisper-large-v3-turbo"
     static let defaultGroqEndpoint = URL(string: "https://api.groq.com/openai/v1/audio/transcriptions")!
     static let appSupportFolderName = "groq-menubar-dictate"
