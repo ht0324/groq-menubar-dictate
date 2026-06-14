@@ -170,13 +170,15 @@ final class DictationStatsStore {
     func recordSuccessfulSession(
         text: String,
         recordingDurationSeconds: TimeInterval,
-        recordedAt: Date = Date()
+        recordedAt: Date = Date(),
+        persistHistory: Bool = true
     ) -> DictationStatsSnapshot {
         recordSuccessfulSession(
             text: text,
             fileMeasuredDurationSeconds: recordingDurationSeconds,
             recorderReportedDurationSeconds: nil,
-            recordedAt: recordedAt
+            recordedAt: recordedAt,
+            persistHistory: persistHistory
         )
     }
 
@@ -185,7 +187,8 @@ final class DictationStatsStore {
         text: String,
         fileMeasuredDurationSeconds: TimeInterval?,
         recorderReportedDurationSeconds: TimeInterval?,
-        recordedAt: Date = Date()
+        recordedAt: Date = Date(),
+        persistHistory: Bool = true
     ) -> DictationStatsSnapshot {
         let wordCount = TypingSavingsCalculator.wordCount(for: text)
         let decision = Self.makeSessionDecision(
@@ -205,7 +208,11 @@ final class DictationStatsStore {
             rejectionReason: decision.rejectionReason,
             flags: decision.flags
         )
-        appendSessionRecord(sessionRecord)
+        // History is a diagnostics-only audit trail; skip the per-session disk
+        // write (and its prune-time full-file read) unless it is enabled.
+        if persistHistory {
+            appendSessionRecord(sessionRecord)
+        }
 
         guard let acceptedDurationSeconds = decision.acceptedDurationSeconds else {
             logRejectedSession(sessionRecord)
@@ -380,10 +387,6 @@ final class DictationStatsStore {
     }
 
     private static func defaultHistoryFileURL(fileManager: FileManager) -> URL {
-        let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-        return appSupportURL
-            .appendingPathComponent(AppConfig.appSupportFolderName, isDirectory: true)
-            .appendingPathComponent("stats-history.jsonl", isDirectory: false)
+        LineListFileStore.appSupportFileURL(fileManager: fileManager, fileName: "stats-history.jsonl")
     }
 }

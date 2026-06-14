@@ -4,9 +4,14 @@ final class SingleInstanceGuard {
     private let lockFilePath: String
     private var lockFileDescriptor: Int32 = -1
 
-    init(lockName: String) {
+    /// Defaults to the per-user temporary directory (mode 0700, owned by the
+    /// current user) rather than the world-writable `/tmp`, so another local
+    /// account cannot squat on or read the lock file.
+    init(lockName: String, directory: URL = FileManager.default.temporaryDirectory) {
         let sanitizedName = lockName.replacingOccurrences(of: "/", with: "_")
-        lockFilePath = "/tmp/\(sanitizedName).lock"
+        lockFilePath = directory
+            .appendingPathComponent("\(sanitizedName).lock", isDirectory: false)
+            .path
     }
 
     deinit {

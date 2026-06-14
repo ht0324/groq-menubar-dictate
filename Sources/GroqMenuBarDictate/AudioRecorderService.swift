@@ -125,6 +125,12 @@ final class AudioRecorderService: NSObject {
     }
 
     func recordedFileDuration(for fileURL: URL) -> TimeInterval? {
+        Self.fileDuration(at: fileURL)
+    }
+
+    /// Reads the encoded clip's duration without touching recorder state, so it
+    /// is safe to call off the main actor (e.g. from a detached task).
+    static func fileDuration(at fileURL: URL) -> TimeInterval? {
         guard let player = try? AVAudioPlayer(contentsOf: fileURL) else {
             return nil
         }

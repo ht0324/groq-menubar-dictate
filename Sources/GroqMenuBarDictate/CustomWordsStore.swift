@@ -25,10 +25,6 @@ final class CustomWordsStore {
         lineList.loadEntries(limit: limit)
     }
 
-    func transcriptionPrompt(limit: Int = 80) -> String? {
-        Self.transcriptionPrompt(from: loadWords(limit: limit))
-    }
-
     static func transcriptionPrompt(from words: [String]) -> String? {
         guard !words.isEmpty else {
             return nil

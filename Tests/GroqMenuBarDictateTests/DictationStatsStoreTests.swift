@@ -100,6 +100,25 @@ final class DictationStatsStoreTests: XCTestCase {
         XCTAssertEqual(history[0].rejectionReason, .durationTooLargeForWordCount)
     }
 
+    func testRecordSuccessfulSessionSkipsHistoryWhenPersistHistoryDisabled() {
+        let store = makeStore()
+
+        let snapshot = store.recordSuccessfulSession(
+            text: "hello world",
+            fileMeasuredDurationSeconds: 4,
+            recorderReportedDurationSeconds: nil,
+            recordedAt: Date(timeIntervalSince1970: 500),
+            persistHistory: false
+        )
+
+        // Aggregate stats still update; only the on-disk audit trail is skipped.
+        XCTAssertEqual(snapshot.successfulSessions, 1)
+        XCTAssertEqual(snapshot.totalWords, 2)
+        XCTAssertEqual(snapshot.totalRecordingSeconds, 4, accuracy: 0.001)
+        XCTAssertTrue(store.loadSessionHistory().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: historyFileURL.path))
+    }
+
     func testSummaryDerivesTypingAndSavedTimeFromCurrentWordsPerMinute() {
         let snapshot = DictationStatsSnapshot(
             successfulSessions: 3,

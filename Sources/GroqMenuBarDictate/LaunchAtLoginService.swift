@@ -18,6 +18,12 @@ enum LaunchAtLoginError: LocalizedError {
 final class LaunchAtLoginService {
     typealias LaunchctlRunner = (_ args: [String], _ allowFailure: Bool) throws -> Void
 
+    private struct LaunchAgentConfiguration {
+        let executablePath: String
+        let standardOutPath: String?
+        let standardErrorPath: String?
+    }
+
     let label = "com.huntae.groq-menubar-dictate"
     private let fileManager: FileManager
     private let customPlistURL: URL?
@@ -68,13 +74,18 @@ final class LaunchAtLoginService {
             guard !resolvedExecutablePath.isEmpty else {
                 return true
             }
-            return configuredExecutablePath != resolvedExecutablePath
+            guard let configuration = configuredLaunchAgent else {
+                return true
+            }
+            return configuration.executablePath != resolvedExecutablePath ||
+                configuration.standardOutPath != desiredStandardOutPath ||
+                configuration.standardErrorPath != desiredStandardErrorPath
         }
 
         return isEnabled
     }
 
-    private var configuredExecutablePath: String? {
+    private var configuredLaunchAgent: LaunchAgentConfiguration? {
         guard let data = try? Data(contentsOf: plistURL),
               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
               let dictionary = plist as? [String: Any],
@@ -84,7 +95,28 @@ final class LaunchAtLoginService {
         else {
             return nil
         }
-        return executablePath
+        return LaunchAgentConfiguration(
+            executablePath: executablePath,
+            standardOutPath: dictionary["StandardOutPath"] as? String,
+            standardErrorPath: dictionary["StandardErrorPath"] as? String
+        )
+    }
+
+    private var launchLogDirectory: URL {
+        fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs", isDirectory: true)
+    }
+
+    private var desiredStandardOutPath: String {
+        launchLogDirectory
+            .appendingPathComponent("groq-menubar-dictate.launchd.out.log")
+            .path
+    }
+
+    private var desiredStandardErrorPath: String {
+        launchLogDirectory
+            .appendingPathComponent("groq-menubar-dictate.launchd.err.log")
+            .path
     }
 
     private func enable(executablePath: String) throws {
@@ -96,6 +128,9 @@ final class LaunchAtLoginService {
         let folder = plistURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
 
+        // ~/Library/Logs is the conventional, user-private home for app logs
+        // and reliably exists, so launchd can redirect here without a world-
+        // readable /tmp file or an extra directory to create.
         let plist: [String: Any] = [
             "Label": label,
             "ProgramArguments": [resolvedExecutablePath],
@@ -103,8 +138,8 @@ final class LaunchAtLoginService {
             "KeepAlive": false,
             "LimitLoadToSessionType": ["Aqua"],
             "WorkingDirectory": (resolvedExecutablePath as NSString).deletingLastPathComponent,
-            "StandardOutPath": "/tmp/groq-menubar-dictate.launchd.out.log",
-            "StandardErrorPath": "/tmp/groq-menubar-dictate.launchd.err.log",
+            "StandardOutPath": desiredStandardOutPath,
+            "StandardErrorPath": desiredStandardErrorPath,
         ]
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try data.write(to: plistURL, options: .atomic)
