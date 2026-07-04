@@ -18,69 +18,30 @@ final class SettingsStoreTests: XCTestCase {
         suiteName = nil
     }
 
-    func testTapDebounceMillisecondsDefaultsTo250WhenUnset() {
+    func testDefaultsForUserFacingSettings() {
         let store = SettingsStore(defaults: defaults)
+
         XCTAssertEqual(store.tapDebounceMilliseconds, 250)
-    }
-
-    func testTapDebounceMillisecondsAllowsExplicitZero() {
-        let store = SettingsStore(defaults: defaults)
-        store.tapDebounceMilliseconds = 0
-        XCTAssertEqual(store.tapDebounceMilliseconds, 0)
-    }
-
-    func testPerformanceDiagnosticsDisabledByDefault() {
-        let store = SettingsStore(defaults: defaults)
         XCTAssertFalse(store.performanceDiagnosticsEnabled)
-    }
-
-    func testPerformanceDiagnosticsPersistsExplicitToggle() {
-        let store = SettingsStore(defaults: defaults)
-        store.performanceDiagnosticsEnabled = true
-        XCTAssertTrue(store.performanceDiagnosticsEnabled)
-        store.performanceDiagnosticsEnabled = false
-        XCTAssertFalse(store.performanceDiagnosticsEnabled)
-    }
-
-    func testMicrophoneInputModeDefaultsToAutomatic() {
-        let store = SettingsStore(defaults: defaults)
         XCTAssertEqual(store.microphoneInputMode, .automatic)
-    }
-
-    func testMicrophoneInputModePersistsSelectedValue() {
-        let store = SettingsStore(defaults: defaults)
-        store.microphoneInputMode = .macBookInternal
-        XCTAssertEqual(store.microphoneInputMode, .macBookInternal)
-
-        store.microphoneInputMode = .automatic
-        XCTAssertEqual(store.microphoneInputMode, .automatic)
-    }
-
-    func testOptionKeyModeDefaultsToAny() {
-        let store = SettingsStore(defaults: defaults)
         XCTAssertEqual(store.optionKeyMode, .any)
+        XCTAssertEqual(store.typingWordsPerMinute, 0)
     }
 
-    func testOptionKeyModePersistsSelectedValue() {
+    func testPersistsNonDefaultUserFacingSettings() {
         let store = SettingsStore(defaults: defaults)
+
+        store.tapDebounceMilliseconds = 0
+        store.performanceDiagnosticsEnabled = true
+        store.microphoneInputMode = .macBookInternal
         store.optionKeyMode = .right
-        XCTAssertEqual(store.optionKeyMode, .right)
-
-        store.optionKeyMode = .left
-        XCTAssertEqual(store.optionKeyMode, .left)
-    }
-
-    func testTypingWordsPerMinuteDefaultsToZeroWhenUnset() {
-        let store = SettingsStore(defaults: defaults)
-        XCTAssertEqual(store.typingWordsPerMinute, 0)
-    }
-
-    func testTypingWordsPerMinutePersistsSelectedValue() {
-        let store = SettingsStore(defaults: defaults)
         store.typingWordsPerMinute = 72
-        XCTAssertEqual(store.typingWordsPerMinute, 72)
 
-        store.typingWordsPerMinute = 0
-        XCTAssertEqual(store.typingWordsPerMinute, 0)
+        let reloadedStore = SettingsStore(defaults: defaults)
+        XCTAssertEqual(reloadedStore.tapDebounceMilliseconds, 0)
+        XCTAssertTrue(reloadedStore.performanceDiagnosticsEnabled)
+        XCTAssertEqual(reloadedStore.microphoneInputMode, .macBookInternal)
+        XCTAssertEqual(reloadedStore.optionKeyMode, .right)
+        XCTAssertEqual(reloadedStore.typingWordsPerMinute, 72)
     }
 }
