@@ -58,6 +58,67 @@ enum SystemAudioDeviceInspector {
         }
     }
 
+    static func allAudioDeviceIDs() throws -> [AudioDeviceID] {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        var status = AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            0,
+            nil,
+            &dataSize
+        )
+        guard status == noErr else {
+            throw CoreAudioError.failed(operation: "size audio device list", status: status)
+        }
+
+        let deviceCount = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        var deviceIDs = [AudioDeviceID](repeating: 0, count: deviceCount)
+        status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            0,
+            nil,
+            &dataSize,
+            &deviceIDs
+        )
+        guard status == noErr else {
+            throw CoreAudioError.failed(operation: "read audio device list", status: status)
+        }
+        return deviceIDs
+    }
+
+    static func hasInputStreams(_ deviceID: AudioDeviceID) -> Bool {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: kAudioDevicePropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        let status = AudioObjectGetPropertyDataSize(deviceID, &propertyAddress, 0, nil, &dataSize)
+        return status == noErr && dataSize >= UInt32(MemoryLayout<AudioStreamID>.size)
+    }
+
+    static func firstInputDevice(matchingName targetName: String) -> AudioDeviceInfo? {
+        guard let deviceIDs = try? allAudioDeviceIDs() else {
+            return nil
+        }
+        for deviceID in deviceIDs where hasInputStreams(deviceID) {
+            guard let info = try? deviceInfo(for: deviceID),
+                  let name = info.name,
+                  name.localizedCaseInsensitiveContains(targetName)
+            else {
+                continue
+            }
+            return info
+        }
+        return nil
+    }
+
     static func deviceInfo(for deviceID: AudioDeviceID) throws -> AudioDeviceInfo {
         AudioDeviceInfo(
             id: deviceID,

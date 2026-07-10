@@ -15,6 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct GroqMenuBarDictateApp {
     @MainActor
     static func main() async {
+        if TriggerReplayCommand.shouldRun(arguments: CommandLine.arguments) {
+            exit(TriggerReplayCommand.run(arguments: CommandLine.arguments))
+        }
+
         if LatencyProbeCommand.shouldRun(arguments: CommandLine.arguments) {
             exit(await LatencyProbeCommand.run(arguments: CommandLine.arguments))
         }

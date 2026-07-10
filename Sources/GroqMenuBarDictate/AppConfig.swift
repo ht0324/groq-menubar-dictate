@@ -11,6 +11,7 @@ enum AppConfig {
 enum MicrophoneInputMode: String, CaseIterable {
     case automatic
     case macBookInternal
+    case cableCreation
 
     var title: String {
         switch self {
@@ -18,6 +19,8 @@ enum MicrophoneInputMode: String, CaseIterable {
             return "Automatic (system default)"
         case .macBookInternal:
             return "Always use this Mac's built-in microphone"
+        case .cableCreation:
+            return "Cable Creation USB input"
         }
     }
 }
@@ -46,6 +49,12 @@ final class SettingsStore {
         static let endPruneEnabled = "settings.endPruneEnabled"
         static let performanceDiagnosticsEnabled = "settings.performanceDiagnosticsEnabled"
         static let launchAtLoginEnabled = "settings.launchAtLoginEnabled"
+        static let audioActivityTriggerEnabled = "settings.audioActivityTriggerEnabled"
+        static let audioTriggerStartThresholdDBFS = "settings.audioTriggerStartThresholdDBFS"
+        static let audioTriggerStopThresholdDBFS = "settings.audioTriggerStopThresholdDBFS"
+        static let audioTriggerStopHoldSeconds = "settings.audioTriggerStopHoldSeconds"
+        static let audioTriggerPreRollSeconds = "settings.audioTriggerPreRollSeconds"
+        static let audioTriggerRawDumpEnabled = "settings.audioTriggerRawDumpEnabled"
         static let microphoneInputMode = "settings.microphoneInputMode"
         static let optionKeyMode = "settings.optionKeyMode"
         static let model = "settings.model"
@@ -119,6 +128,74 @@ final class SettingsStore {
         set {
             defaults.set(newValue, forKey: Key.launchAtLoginEnabled)
         }
+    }
+
+    var audioActivityTriggerEnabled: Bool {
+        get {
+            if defaults.object(forKey: Key.audioActivityTriggerEnabled) == nil {
+                return false
+            }
+            return defaults.bool(forKey: Key.audioActivityTriggerEnabled)
+        }
+        set {
+            defaults.set(newValue, forKey: Key.audioActivityTriggerEnabled)
+        }
+    }
+
+    /// Detector tuning with no settings UI; override for calibration via e.g.
+    /// defaults write com.huntae.groq-menubar-dictate settings.audioTriggerStopThresholdDBFS -float -78
+    var audioActivityTriggerConfiguration: AudioActivityTriggerConfiguration {
+        var configuration = AudioActivityTriggerConfiguration()
+        configuration.startThresholdDBFS = doubleValue(
+            forKey: Key.audioTriggerStartThresholdDBFS,
+            defaultValue: configuration.startThresholdDBFS,
+            clampedTo: -120...0
+        )
+        // Cap at the start threshold so a bad override can't break the
+        // detector's hysteresis (stop must not exceed start).
+        configuration.stopThresholdDBFS = min(
+            doubleValue(
+                forKey: Key.audioTriggerStopThresholdDBFS,
+                defaultValue: configuration.stopThresholdDBFS,
+                clampedTo: -120...0
+            ),
+            configuration.startThresholdDBFS
+        )
+        configuration.stopHoldSeconds = doubleValue(
+            forKey: Key.audioTriggerStopHoldSeconds,
+            defaultValue: configuration.stopHoldSeconds,
+            clampedTo: 0.05...5
+        )
+        configuration.preRollSeconds = doubleValue(
+            forKey: Key.audioTriggerPreRollSeconds,
+            defaultValue: configuration.preRollSeconds,
+            clampedTo: 0...5
+        )
+        return configuration
+    }
+
+    var audioTriggerRawDumpEnabled: Bool {
+        get {
+            defaults.bool(forKey: Key.audioTriggerRawDumpEnabled)
+        }
+        set {
+            defaults.set(newValue, forKey: Key.audioTriggerRawDumpEnabled)
+        }
+    }
+
+    private func doubleValue(
+        forKey key: String,
+        defaultValue: Double,
+        clampedTo range: ClosedRange<Double>
+    ) -> Double {
+        guard defaults.object(forKey: key) != nil else {
+            return defaultValue
+        }
+        let raw = defaults.double(forKey: key)
+        guard raw.isFinite else {
+            return defaultValue
+        }
+        return min(max(raw, range.lowerBound), range.upperBound)
     }
 
     var microphoneInputMode: MicrophoneInputMode {

@@ -7,6 +7,7 @@ struct SettingsSnapshot {
     var endPruneEnabled: Bool
     var performanceDiagnosticsEnabled: Bool
     var launchAtLoginEnabled: Bool
+    var audioActivityTriggerEnabled: Bool
     var microphoneInputMode: MicrophoneInputMode
     var optionKeyMode: OptionKeyMode
     var model: String
@@ -66,6 +67,7 @@ final class SettingsWindowController: NSWindowController {
     private let optionKeyModePopup = NSPopUpButton()
     private let microphoneInputModePopup = NSPopUpButton()
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
+    private let audioActivityTriggerCheckbox = NSButton(checkboxWithTitle: "Auto-record from ting mic (Cable Creation input)", target: nil, action: nil)
     private let autoPasteCheckbox = NSButton(checkboxWithTitle: "Auto-paste after copy", target: nil, action: nil)
     private let endPruneCheckbox = NSButton(checkboxWithTitle: "Prune transcript ending phrases", target: nil, action: nil)
     private let diagnosticsCheckbox = NSButton(checkboxWithTitle: "Enable performance diagnostics", target: nil, action: nil)
@@ -135,6 +137,7 @@ final class SettingsWindowController: NSWindowController {
             microphoneInputModePopup.select(matchingItem)
         }
         launchAtLoginCheckbox.state = snapshot.launchAtLoginEnabled ? .on : .off
+        audioActivityTriggerCheckbox.state = snapshot.audioActivityTriggerEnabled ? .on : .off
         autoPasteCheckbox.state = snapshot.autoPasteEnabled ? .on : .off
         endPruneCheckbox.state = snapshot.endPruneEnabled ? .on : .off
         diagnosticsCheckbox.state = snapshot.performanceDiagnosticsEnabled ? .on : .off
@@ -199,6 +202,7 @@ final class SettingsWindowController: NSWindowController {
             arrangedSubviews: [
                 makeLabeledRow(label: "Option key", control: optionKeyModePopup, controlWidth: 340),
                 makeLabeledRow(label: "Microphone", control: microphoneInputModePopup, controlWidth: 400),
+                makeCheckboxRow(audioActivityTriggerCheckbox, width: 340),
             ]
         ))
 
@@ -307,8 +311,8 @@ final class SettingsWindowController: NSWindowController {
         return row
     }
 
-    private func makeCheckboxRow(_ checkbox: NSButton) -> NSView {
-        makeLabeledRow(label: "", control: checkbox, controlWidth: 260)
+    private func makeCheckboxRow(_ checkbox: NSButton, width: CGFloat = 260) -> NSView {
+        makeLabeledRow(label: "", control: checkbox, controlWidth: width)
     }
 
     private func makeIndentedHelpRow(_ helpView: NSTextField) -> NSView {
@@ -367,6 +371,7 @@ final class SettingsWindowController: NSWindowController {
             endPruneEnabled: endPruneCheckbox.state == .on,
             performanceDiagnosticsEnabled: diagnosticsCheckbox.state == .on,
             launchAtLoginEnabled: launchAtLoginCheckbox.state == .on,
+            audioActivityTriggerEnabled: audioActivityTriggerCheckbox.state == .on,
             microphoneInputMode: selectedInputMode,
             optionKeyMode: selectedOptionKeyMode,
             model: modelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),

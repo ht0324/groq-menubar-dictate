@@ -8,6 +8,8 @@ enum AudioRecorderError: LocalizedError {
     case failedToStart
     case builtInMicrophoneUnavailable
     case failedToSelectBuiltInMicrophone
+    case cableCreationInputUnavailable
+    case failedToSelectCableCreationInput
 
     var errorDescription: String? {
         switch self {
@@ -21,6 +23,10 @@ enum AudioRecorderError: LocalizedError {
             return "Built-in microphone not available on this Mac."
         case .failedToSelectBuiltInMicrophone:
             return "Failed to switch to the built-in microphone."
+        case .cableCreationInputUnavailable:
+            return "Cable Creation input not available."
+        case .failedToSelectCableCreationInput:
+            return "Failed to switch to the Cable Creation input."
         }
     }
 }
@@ -58,6 +64,14 @@ final class AudioRecorderService: NSObject {
                 throw AudioRecorderError.builtInMicrophoneUnavailable
             } catch {
                 throw AudioRecorderError.failedToSelectBuiltInMicrophone
+            }
+        case .cableCreation:
+            do {
+                inputOverride = try InputDeviceOverride.installCableCreationAsDefaultInput()
+            } catch AudioRecorderError.cableCreationInputUnavailable {
+                throw AudioRecorderError.cableCreationInputUnavailable
+            } catch {
+                throw AudioRecorderError.failedToSelectCableCreationInput
             }
         }
 
@@ -158,10 +172,27 @@ private struct InputDeviceOverride {
         guard let builtInMicrophoneID = try SystemAudioInputSelector.builtInMicrophoneInputDeviceID() else {
             throw AudioRecorderError.builtInMicrophoneUnavailable
         }
+        return try installDefaultInputDevice(builtInMicrophoneID, previousInputDeviceID: previousInputDeviceID)
+    }
+
+    static func installCableCreationAsDefaultInput() throws -> InputDeviceOverride {
+        let previousInputDeviceID = try SystemAudioInputSelector.defaultInputDeviceID()
+        guard let cableCreation = SystemAudioDeviceInspector.firstInputDevice(
+            matchingName: AudioActivityCaptureService.targetDeviceName
+        ) else {
+            throw AudioRecorderError.cableCreationInputUnavailable
+        }
+        return try installDefaultInputDevice(cableCreation.id, previousInputDeviceID: previousInputDeviceID)
+    }
+
+    private static func installDefaultInputDevice(
+        _ inputDeviceID: AudioDeviceID,
+        previousInputDeviceID: AudioDeviceID
+    ) throws -> InputDeviceOverride {
         let shouldRestorePreviousInputDevice = SystemAudioInputSelector
             .shouldRestoreInputDeviceAfterRecording(previousInputDeviceID)
 
-        guard builtInMicrophoneID != previousInputDeviceID else {
+        guard inputDeviceID != previousInputDeviceID else {
             return InputDeviceOverride(
                 previousInputDeviceID: previousInputDeviceID,
                 changedDefaultInputDevice: false,
@@ -169,7 +200,7 @@ private struct InputDeviceOverride {
             )
         }
 
-        try SystemAudioInputSelector.setDefaultInputDeviceID(builtInMicrophoneID)
+        try SystemAudioInputSelector.setDefaultInputDeviceID(inputDeviceID)
         return InputDeviceOverride(
             previousInputDeviceID: previousInputDeviceID,
             changedDefaultInputDevice: true,

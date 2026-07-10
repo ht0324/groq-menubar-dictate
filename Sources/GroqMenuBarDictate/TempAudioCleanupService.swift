@@ -82,7 +82,7 @@ final class TempAudioCleanupService {
 
     private func isManagedAudioTempFile(_ fileURL: URL) -> Bool {
         let fileName = fileURL.lastPathComponent
-        if fileName.hasPrefix("dictation-"), fileURL.pathExtension.lowercased() == "m4a" {
+        if fileName.hasPrefix("dictation-"), ["m4a", "wav"].contains(fileURL.pathExtension.lowercased()) {
             return true
         }
         return fileName.hasPrefix("groq-multipart-")

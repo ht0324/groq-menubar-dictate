@@ -11,6 +11,7 @@ enum MenuBarStatusState {
 struct MenuBarActions {
     let retryLastRecording: Selector
     let discardLastRecording: Selector
+    let toggleAudioTrigger: Selector
     let openSettings: Selector
     let testPermissions: Selector
     let quit: Selector
@@ -23,6 +24,7 @@ final class MenuBarController {
     private let statusMenuItem = NSMenuItem(title: "Starting...", action: nil, keyEquivalent: "")
     private let retryLastRecordingMenuItem = NSMenuItem(title: "Retry Last Recording", action: nil, keyEquivalent: "")
     private let discardLastRecordingMenuItem = NSMenuItem(title: "Discard Last Recording", action: nil, keyEquivalent: "")
+    private let audioTriggerMenuItem = NSMenuItem(title: "Auto-Record from ting", action: nil, keyEquivalent: "")
     private let retrySeparator = NSMenuItem.separator()
     private let statsMenu = NSMenu(title: "Stats")
     private let statsMenuItem = NSMenuItem(title: "Stats", action: nil, keyEquivalent: "")
@@ -38,6 +40,10 @@ final class MenuBarController {
         statusMenuItem.title = message
         statusItem.button?.toolTip = message
         updateStatusItemAppearance(for: state)
+    }
+
+    func updateAudioTriggerToggle(isOn: Bool) {
+        audioTriggerMenuItem.state = isOn ? .on : .off
     }
 
     func updateRetryControls(isAvailable: Bool, isEnabled: Bool) {
@@ -151,6 +157,10 @@ final class MenuBarController {
         updateRetryControls(isAvailable: false, isEnabled: false)
 
         menu.addItem(.separator())
+
+        audioTriggerMenuItem.action = actions.toggleAudioTrigger
+        audioTriggerMenuItem.toolTip = "Start/stop dictation automatically from the ting mic (\(AudioActivityCaptureService.targetDeviceName) input)."
+        menu.addItem(audioTriggerMenuItem)
 
         menu.addItem(menuItem(title: "Open Settings", action: actions.openSettings, keyEquivalent: ","))
         menu.addItem(menuItem(title: "Test Permissions", action: actions.testPermissions))

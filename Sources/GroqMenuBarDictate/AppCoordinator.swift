@@ -11,6 +11,11 @@ final class AppCoordinator: NSObject {
         case error
     }
 
+    private enum RecordingSource {
+        case manual
+        case audioTrigger
+    }
+
     private let settings = SettingsStore()
     private let customWords = CustomWordsStore()
     private let filterWords = FilterWordsStore()
@@ -24,6 +29,7 @@ final class AppCoordinator: NSObject {
     private let sounds = SoundCuePlayer()
     private let tempAudioCleanup = TempAudioCleanupService()
     private let menuBar = MenuBarController()
+    private let audioCapture = AudioActivityCaptureService()
     private let logger = Logger(subsystem: "com.huntae.groq-menubar-dictate", category: "workflow")
 
     private lazy var optionTapRecognizer = OptionTapRecognizer(
@@ -36,11 +42,15 @@ final class AppCoordinator: NSObject {
     )
 
     private var state: State = .idle
+    private var recordingSource: RecordingSource?
     private var isStartingRecording = false
     private var statusMessage = "Idle: tap Option to record."
     private var idleResetWorkItem: DispatchWorkItem?
     private var pendingRetryClip: RecordedClip?
     private var connectionKeepWarmTask: Task<Void, Never>?
+    /// Utterances the ting captured while a previous clip was still
+    /// transcribing; drained FIFO so nothing dictated back-to-back is lost.
+    private var pendingTriggerClips: [RecordedClip] = []
 
     /// Shorter than typical server/client keep-alive idle timeouts so the
     /// prewarmed connection survives recordings longer than one ping.
@@ -53,11 +63,13 @@ final class AppCoordinator: NSObject {
             actions: MenuBarActions(
                 retryLastRecording: #selector(retryLastRecordingFromMenu),
                 discardLastRecording: #selector(discardLastRecordingFromMenu),
+                toggleAudioTrigger: #selector(toggleAudioTriggerFromMenu),
                 openSettings: #selector(openSettingsFromMenu),
                 testPermissions: #selector(testPermissionsFromMenu),
                 quit: #selector(quitFromMenu)
             )
         )
+        menuBar.updateAudioTriggerToggle(isOn: settings.audioActivityTriggerEnabled)
         refreshStatsMenu()
         refreshMenuBarStatus()
         optionTapRecognizer.onValidTap = { [weak self] in
@@ -68,6 +80,31 @@ final class AppCoordinator: NSObject {
         }
         optionTapRecognizer.onEscapeKeyDown = { [weak self] in
             self?.handleEscapeKey()
+        }
+        audioCapture.onCaptureStarted = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handleTriggerCaptureStarted()
+            }
+        }
+        audioCapture.onCaptureFinished = { [weak self] clip in
+            Task { @MainActor [weak self] in
+                self?.handleTriggerCaptureFinished(clip)
+            }
+        }
+        audioCapture.onCaptureCancelled = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handleTriggerCaptureCancelled()
+            }
+        }
+        audioCapture.onDeviceConnectionChanged = { [weak self] connected in
+            Task { @MainActor [weak self] in
+                self?.handleTriggerDeviceConnectionChanged(connected)
+            }
+        }
+        audioCapture.onMonitorError = { [weak self] message in
+            Task { @MainActor [weak self] in
+                self?.setError(message)
+            }
         }
     }
 
@@ -89,6 +126,9 @@ final class AppCoordinator: NSObject {
         }
 
         optionTapRecognizer.start()
+        Task { [weak self] in
+            await self?.updateAudioActivityTriggerMonitor()
+        }
         logSuspiciousStatsIfNeeded()
         presentSetupGuidanceIfNeeded()
     }
@@ -100,9 +140,7 @@ final class AppCoordinator: NSObject {
                 await self?.startRecordingFlow()
             }
         case .recording:
-            Task { [weak self] in
-                await self?.stopAndTranscribeFlow()
-            }
+            requestStopOfActiveRecording()
         case .transcribing:
             return
         }
@@ -110,6 +148,15 @@ final class AppCoordinator: NSObject {
 
     private func handleStopRequest() {
         guard state == .recording else {
+            return
+        }
+        requestStopOfActiveRecording()
+    }
+
+    private func requestStopOfActiveRecording() {
+        if recordingSource == .audioTrigger {
+            // Finalization and transcription arrive via onCaptureFinished.
+            audioCapture.finishActiveCapture()
             return
         }
         Task { [weak self] in
@@ -122,6 +169,87 @@ final class AppCoordinator: NSObject {
             return
         }
         abortRecordingFlow()
+    }
+
+    private func handleTriggerCaptureStarted() {
+        switch state {
+        case .idle, .error:
+            recordingSource = .audioTrigger
+            clearPendingRetryClip(deleteFile: true)
+            setState(.recording, message: "Recording from ting... release the handle to transcribe.")
+            sounds.playPing()
+        case .recording:
+            if recordingSource == .manual {
+                // Never let line noise interfere with a manual session.
+                audioCapture.cancelActiveCapture()
+            }
+        case .transcribing:
+            // Keep capturing silently; the finished clip is queued and
+            // transcribed as soon as the current one completes.
+            return
+        }
+    }
+
+    private func handleTriggerCaptureFinished(_ clip: RecordedClip) {
+        if state == .recording, recordingSource == .audioTrigger {
+            recordingSource = nil
+            // Claim the transcription slot synchronously so nothing else can
+            // start a parallel transcription before the task below runs.
+            setState(.transcribing, message: "Transcribing...")
+            Task { [weak self] in
+                await self?.transcribeRecordedClip(
+                    clip,
+                    diagnosticsEnabled: self?.settings.performanceDiagnosticsEnabled ?? false,
+                    flowStart: DispatchTime.now(),
+                    initialTiming: WorkflowTiming(),
+                    transcribingMessage: "Transcribing...",
+                    suppressEmptyTranscriptError: true
+                )
+            }
+            return
+        }
+
+        pendingTriggerClips.append(clip)
+        drainPendingTriggerClipsIfIdle()
+    }
+
+    private func handleTriggerCaptureCancelled() {
+        guard state == .recording, recordingSource == .audioTrigger else {
+            return
+        }
+        recordingSource = nil
+        setIdleStatus("Recording aborted.")
+    }
+
+    private func handleTriggerDeviceConnectionChanged(_ connected: Bool) {
+        guard settings.audioActivityTriggerEnabled else {
+            return
+        }
+        if connected {
+            setIdleStatusIfIdle("ting connected — auto-record armed.")
+        } else {
+            setIdleStatusIfIdle("ting disconnected — auto-record paused.")
+        }
+    }
+
+    private func drainPendingTriggerClipsIfIdle() {
+        guard state == .idle || state == .error, !pendingTriggerClips.isEmpty else {
+            return
+        }
+        let clip = pendingTriggerClips.removeFirst()
+        // Claim the slot synchronously: a second clip finishing in the window
+        // before the task starts must queue, not transcribe in parallel.
+        setState(.transcribing, message: "Transcribing queued dictation...")
+        Task { [weak self] in
+            await self?.transcribeRecordedClip(
+                clip,
+                diagnosticsEnabled: self?.settings.performanceDiagnosticsEnabled ?? false,
+                flowStart: DispatchTime.now(),
+                initialTiming: WorkflowTiming(),
+                transcribingMessage: "Transcribing queued dictation...",
+                suppressEmptyTranscriptError: true
+            )
+        }
     }
 
     private func startRecordingFlow() async {
@@ -155,6 +283,7 @@ final class AppCoordinator: NSObject {
 
         do {
             try recorder.startRecording(mode: settings.microphoneInputMode)
+            recordingSource = .manual
             clearPendingRetryClip(deleteFile: true)
             let hasListen = ensureEventPermission(.listen)
             if hasListen {
@@ -169,9 +298,10 @@ final class AppCoordinator: NSObject {
     }
 
     private func stopAndTranscribeFlow() async {
-        guard state == .recording else {
+        guard state == .recording, recordingSource == .manual else {
             return
         }
+        recordingSource = nil
 
         let diagnosticsEnabled = settings.performanceDiagnosticsEnabled
         let flowStart = DispatchTime.now()
@@ -226,8 +356,12 @@ final class AppCoordinator: NSObject {
         diagnosticsEnabled: Bool,
         flowStart: DispatchTime,
         initialTiming: WorkflowTiming,
-        transcribingMessage: String
+        transcribingMessage: String,
+        suppressEmptyTranscriptError: Bool = false
     ) async {
+        defer {
+            drainPendingTriggerClipsIfIdle()
+        }
         var timing = initialTiming
         // Stat the file only when diagnostics are on; on the success path the
         // transcription service reports the size again through its metrics.
@@ -285,8 +419,15 @@ final class AppCoordinator: NSObject {
                 timing.result = "empty_transcript_after_filtering"
                 timing.totalMilliseconds = millisecondsSince(flowStart)
                 logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
-                preserveRecordingForRetry(recordedClip)
-                setError("No speech detected (or fully removed by filters).")
+                if suppressEmptyTranscriptError {
+                    // Expected for ting handle clunks captured without
+                    // speech; don't beep or pollute the retry slot.
+                    try? FileManager.default.removeItem(at: recordedClip.fileURL)
+                    setIdleStatus("No speech detected.")
+                } else {
+                    preserveRecordingForRetry(recordedClip)
+                    setError("No speech detected (or fully removed by filters).")
+                }
                 return
             }
 
@@ -350,6 +491,12 @@ final class AppCoordinator: NSObject {
         guard state == .recording else {
             return
         }
+        if recordingSource == .audioTrigger {
+            // State cleanup happens via onCaptureCancelled.
+            audioCapture.cancelActiveCapture()
+            return
+        }
+        recordingSource = nil
         do {
             let recordedClip = try recorder.stopRecording()
             try? FileManager.default.removeItem(at: recordedClip.fileURL)
@@ -418,6 +565,13 @@ final class AppCoordinator: NSObject {
                 try? await Task.sleep(nanoseconds: UInt64(Self.connectionKeepWarmInterval * 1_000_000_000))
             }
         }
+    }
+
+    private func setIdleStatusIfIdle(_ message: String) {
+        guard state == .idle || state == .error else {
+            return
+        }
+        setIdleStatus(message)
     }
 
     private func setIdleStatus(_ message: String, transientSeconds: TimeInterval? = 4) {
@@ -514,6 +668,7 @@ final class AppCoordinator: NSObject {
             endPruneEnabled: settings.endPruneEnabled,
             performanceDiagnosticsEnabled: settings.performanceDiagnosticsEnabled,
             launchAtLoginEnabled: launchAtLoginEnabled,
+            audioActivityTriggerEnabled: settings.audioActivityTriggerEnabled,
             microphoneInputMode: settings.microphoneInputMode,
             optionKeyMode: settings.optionKeyMode,
             model: settings.model,
@@ -545,6 +700,7 @@ final class AppCoordinator: NSObject {
         settings.endPruneEnabled = snapshot.endPruneEnabled
         settings.performanceDiagnosticsEnabled = snapshot.performanceDiagnosticsEnabled
         settings.launchAtLoginEnabled = snapshot.launchAtLoginEnabled
+        settings.audioActivityTriggerEnabled = snapshot.audioActivityTriggerEnabled
         settings.microphoneInputMode = snapshot.microphoneInputMode
         settings.optionKeyMode = snapshot.optionKeyMode
         settings.apiKey = snapshot.apiKey
@@ -552,6 +708,9 @@ final class AppCoordinator: NSObject {
         settings.languageHint = snapshot.languageHint
         settings.typingWordsPerMinute = snapshot.typingWordsPerMinute
         refreshStatsMenu()
+        Task { [weak self] in
+            await self?.updateAudioActivityTriggerMonitor()
+        }
         do {
             try launchAtLogin.setEnabled(
                 snapshot.launchAtLoginEnabled,
@@ -631,6 +790,54 @@ final class AppCoordinator: NSObject {
 
     private func ensureEventPermission(_ access: PermissionService.EventAccess) -> Bool {
         permissions.ensureEventAccess(access)
+    }
+
+    private func updateAudioActivityTriggerMonitor() async {
+        menuBar.updateAudioTriggerToggle(isOn: settings.audioActivityTriggerEnabled)
+        guard settings.audioActivityTriggerEnabled else {
+            audioCapture.setEnabled(false)
+            return
+        }
+
+        // requestAccess reports the true grant state (immediately when already
+        // authorized); the synchronous status snapshot can read stale at cold
+        // launch. Never persist-disable the setting here — a transient false
+        // negative would silently turn the feature off across restarts.
+        guard await permissions.requestMicrophoneAccess() else {
+            audioCapture.setEnabled(false)
+            setError("Microphone permission denied; ting auto-record is paused until access is granted.")
+            return
+        }
+
+        audioCapture.setEnabled(
+            true,
+            configuration: settings.audioActivityTriggerConfiguration,
+            levelLoggingEnabled: settings.performanceDiagnosticsEnabled,
+            rawDumpEnabled: settings.audioTriggerRawDumpEnabled
+        )
+        if !audioCapture.isDeviceConnected {
+            setIdleStatusIfIdle("Auto-record armed — waiting for ting (\(AudioActivityCaptureService.targetDeviceName) input).")
+        }
+    }
+
+    @objc private func toggleAudioTriggerFromMenu() {
+        settings.audioActivityTriggerEnabled.toggle()
+        let enabled = settings.audioActivityTriggerEnabled
+        Task { [weak self] in
+            await self?.updateAudioActivityTriggerMonitor()
+            guard let self else {
+                return
+            }
+            if enabled {
+                self.setIdleStatusIfIdle(
+                    self.audioCapture.isDeviceConnected
+                        ? "ting auto-record on."
+                        : "ting auto-record on — waiting for the adapter."
+                )
+            } else {
+                self.setIdleStatusIfIdle("ting auto-record off.")
+            }
+        }
     }
 
     private func logSuspiciousStatsIfNeeded() {
