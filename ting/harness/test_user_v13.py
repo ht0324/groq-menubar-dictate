@@ -31,13 +31,21 @@ class UserV13LeverStartStopTests(unittest.TestCase):
         self.assertTrue(any("v13 markers loaded start=1 stop=1" in line for line in logs))
 
     def test_rest_squeeze_release_emits_start_then_stop(self):
-        env, spl, _logs = load_user()
+        env, spl, logs = load_user()
 
         send_adc2(env, 3900)
         send_adc2(env, 581)
         send_adc2(env, 3900)
 
         assert_marker_pulses(self, spl, [2, 3])
+        marker_logs = [line.split(" ", 2)[2] for line in logs if " marker " in line]
+        self.assertEqual(
+            marker_logs,
+            [
+                "marker start profile=v13 v=581",
+                "marker stop profile=v13 v=3900",
+            ],
+        )
 
     def test_finger_rest_then_release_emits_no_marker_pulses(self):
         env, spl, _logs = load_user()

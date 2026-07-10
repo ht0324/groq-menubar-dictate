@@ -64,13 +64,13 @@ def _mark(m):
             if _st[0] == IDLE and v < START_BELOW:
                 _st[0] = DOWN
                 pulse(2)
-                _log('marker start v=%d' % v)
+                _log('marker start profile=v13 v=%d' % v)
             elif _st[0] == DOWN and v > RELEASE_ABOVE:
                 # Return to IDLE before the 80 ms pulse so a callback that lands
                 # mid-pulse cannot fire a second stop.
                 _st[0] = IDLE
                 pulse(3)
-                _log('marker stop v=%d' % v)
+                _log('marker stop profile=v13 v=%d' % v)
         elif v == 4 and t in (1, 2):
             name = 'press' if t == 1 else 'release'
             _log('click %s v_last=%d' % (name, _st[1]))

@@ -32,194 +32,412 @@ SAMPLE_RATE = 16_000
 START_FREQUENCY = 6_000
 STOP_FREQUENCY = 7_000
 BASE_TIME = datetime(2026, 7, 7, 21, 26, 3, 123456, tzinfo=timezone.utc).timestamp()
+UNSET = object()
 
 
 class AnalyzeFlightRecorderTests(unittest.TestCase):
-    def test_clean_session_reports_one_chain_per_squeeze_and_exits_zero(self):
+    def test_complete_marker_chains_pass_with_serial_printing_after_tones(self):
         with tempfile.TemporaryDirectory() as tmp:
             session_dir = Path(tmp)
-            build_session(
-                session_dir,
-                tone_offsets=[0.90, 2.10],
-                firmware_offsets=[0.90, 2.10],
-                app_stop_offsets=[1.05, 2.25],
-            )
+            build_session(session_dir, firmware_pairs=[(1.0, 2.0), (3.0, 4.2)])
 
             status, output = run_analyzer(session_dir)
 
             self.assertEqual(status, 0, output)
-            self.assertIn("clean stop chains: 2", output)
-            self.assertIn("broken chains: 0", output)
-            self.assertIn("anomalies: 0", output)
+            self.assertIn("acceptance: PASS", output)
+            self.assertIn("clean full capture chains: 2", output)
+            self.assertIn("count mismatches: 0", output)
+            self.assertIn("recorder metadata: PASS", output)
+            self.assertIn("invalid firmware profiles: 0", output)
 
-    def test_firmware_stop_with_missing_tone_breaks_at_tone_layer(self):
+    def test_finished_recorder_metadata_is_valid_for_reanalysis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir)
+            update_meta(session_dir, status="finished")
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 0, output)
+            self.assertIn("acceptance: PASS", output)
+            self.assertIn("recorder metadata: PASS", output)
+
+    def test_missing_firmware_profile_cannot_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, firmware_profiles=[None, None])
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("profile=missing", output)
+            self.assertIn("invalid firmware profiles: 2", output)
+            self.assertIn("acceptance: FAIL", output)
+
+    def test_wrong_firmware_profile_cannot_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, firmware_profiles=["v12", "v12"])
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("profile=v12", output)
+            self.assertIn("invalid firmware profiles: 2", output)
+            self.assertIn("acceptance: FAIL", output)
+
+    def test_mixed_firmware_profiles_cannot_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, firmware_profiles=["v13", "v12"])
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("firmware stop profile=v12 (expected v13)", output)
+            self.assertIn("invalid firmware profiles: 1", output)
+            self.assertIn("acceptance: FAIL", output)
+
+    def test_app_marker_event_before_tone_beyond_anchor_uncertainty_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, app_starts=[(0.50, "marker")])
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("BROKEN app activity start missing", output)
+            self.assertIn("acceptance: FAIL", output)
+
+    def test_app_marker_event_within_anchor_uncertainty_can_match_tone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, app_starts=[(0.65, "marker")])
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 0, output)
+            self.assertIn("acceptance: PASS", output)
+
+    def test_finalization_after_next_app_start_cannot_cross_capture_boundary(self):
         with tempfile.TemporaryDirectory() as tmp:
             session_dir = Path(tmp)
             build_session(
                 session_dir,
-                tone_offsets=[],
-                firmware_offsets=[1.00],
-                app_stop_offsets=[],
+                firmware_pairs=[(1.0, 2.0), (2.05, 3.0)],
+                finalized=[2.02, 2.97],
             )
 
             status, output = run_analyzer(session_dir)
 
             self.assertEqual(status, 2, output)
-            self.assertIn("BROKEN fw-only: tone never reached audio", output)
-            self.assertIn("fw-only breaks (tone never reached audio): 1", output)
+            self.assertIn("finalized capture missing before next app START", output)
+            self.assertIn("ANOMALY unmatched finalized capture", output)
+            self.assertIn("acceptance: FAIL", output)
 
-    def test_tone_without_firmware_line_is_phantom(self):
+    def test_failed_preflight_metadata_cannot_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
             session_dir = Path(tmp)
-            build_session(
+            build_session(session_dir)
+            meta = read_meta(session_dir)
+            meta["preflight"]["serial"]["result"] = "fail"
+            write_meta(session_dir, meta)
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("preflight checks not passed: serial", output)
+            self.assertIn("recorder metadata: FAIL", output)
+            self.assertIn("acceptance: FAIL", output)
+
+    def test_failed_artifact_integrity_metadata_cannot_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir)
+            update_meta(
                 session_dir,
-                tone_offsets=[1.00],
-                firmware_offsets=[],
-                app_stop_offsets=[1.18],
+                artifact_integrity={
+                    "result": "fail",
+                    "errors": ["active raw WAV did not grow during the capture interval"],
+                },
             )
 
             status, output = run_analyzer(session_dir)
 
             self.assertEqual(status, 2, output)
-            self.assertIn("ANOMALY phantom tone: no firmware marker stop", output)
-            self.assertIn("phantom tones: 1", output)
+            self.assertIn("artifact_integrity must report pass with no errors", output)
+            self.assertIn("recorder metadata: FAIL", output)
+            self.assertIn("acceptance: FAIL", output)
 
-    def test_missing_wav_marks_tone_checks_unknown(self):
+    def test_termination_completion_reason_cannot_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir)
+            update_meta(session_dir, completion_reason="termination_signal")
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("completion_reason must be user_interrupt", output)
+            self.assertIn("recorder metadata: FAIL", output)
+
+    def test_failed_recorder_status_cannot_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir)
+            update_meta(session_dir, status="artifact_failed")
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("status must be captured or finished", output)
+            self.assertIn("recorder metadata: FAIL", output)
+
+    def test_non_object_meta_json_fails_without_crashing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir)
+            (session_dir / "meta.json").write_text("[]", encoding="utf-8")
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("meta.json must contain a JSON object", output)
+            self.assertIn("recorder metadata: FAIL", output)
+
+    def test_non_object_app_log_record_fails_without_crashing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir)
+            app_log_path = session_dir / "app-log.ndjson"
+            app_log_path.write_text("42\n" + app_log_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("ndjson record must contain a JSON object: 42", output)
+            self.assertIn("unknown events: 1", output)
+            self.assertIn("acceptance: FAIL", output)
+
+    def test_missing_expected_count_cannot_false_green_empty_session(self):
         with tempfile.TemporaryDirectory() as tmp:
             session_dir = Path(tmp)
             build_session(
                 session_dir,
-                tone_offsets=[1.00],
-                firmware_offsets=[1.00],
-                app_stop_offsets=[1.18],
-                missing_wav=True,
+                firmware_pairs=[],
+                expected_squeezes=None,
             )
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("ANOMALY positive expected squeeze count required", output)
+            self.assertIn("expected squeezes: missing or non-positive", output)
+            self.assertIn("acceptance: FAIL", output)
+
+    def test_zero_expected_count_is_not_an_acceptance_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(
+                session_dir,
+                firmware_pairs=[],
+                expected_squeezes=0,
+            )
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("positive expected_squeezes is required", output)
+
+    def test_stop_only_session_is_inactive_and_cannot_false_green(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(
+                session_dir,
+                firmware_pairs=[],
+                firmware_markers=[("stop", 2.0)],
+                stop_tones=[1.92],
+                app_stops=[(1.96, "marker")],
+                finalized=[1.97],
+                expected_squeezes=1,
+            )
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("ANOMALY inactive firmware STOP without START", output)
+            self.assertIn("inactive-capture stops: 1", output)
+            self.assertIn("acceptance: FAIL", output)
+
+    def test_missing_start_tone_breaks_otherwise_complete_stop_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, start_tones=[])
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("BROKEN start tone never reached audio", output)
+            self.assertIn("clean full capture chains: 0", output)
+
+    def test_phantom_start_tone_is_anomaly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, start_tones=[0.92, 2.55])
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("ANOMALY phantom/unmatched START tone", output)
+            self.assertIn("phantom/unmatched tones: 1", output)
+
+    def test_start_without_explicit_marker_cause_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, app_starts=[(0.96, None)])
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("ANOMALY activity start cause=missing", output)
+            self.assertIn("non-marker or missing app causes: 1", output)
+
+    def test_level_caused_stop_fails_even_when_near_stop_marker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, app_stops=[(1.96, "level")])
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("ANOMALY activity stop cause=level", output)
+            self.assertIn("acceptance: FAIL", output)
+
+    def test_cancelled_capture_fails_and_makes_stop_inactive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, cancellations=[1.50])
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("ANOMALY capture cancelled", output)
+            self.assertIn("capture inactive before stop", output)
+            self.assertIn("capture cancellations: 1", output)
+
+    def test_missing_finalized_capture_breaks_chain(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, finalized=[])
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("finalized capture missing", output)
+            self.assertIn("count mismatches: 1", output)
+
+    def test_fatal_serial_error_fails_an_otherwise_clean_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, serial_errors=[(2.30, "SERIAL_EOF device disappeared")])
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("ANOMALY fatal serial error", output)
+            self.assertIn("fatal serial errors: 1", output)
+
+    def test_marker_outside_raw_wav_coverage_is_unknown_and_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(
+                session_dir,
+                wav_start_offset=3.0,
+                wav_duration_seconds=2.0,
+                start_tones=[3.20],
+                stop_tones=[4.00],
+            )
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("UNKNOWN outside raw WAV coverage", output)
+            self.assertIn("outside-WAV-coverage unknowns: 2", output)
+
+    def test_missing_wav_stream_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, missing_wav=True)
 
             status, output = run_analyzer(session_dir)
 
             self.assertEqual(status, 2, output)
             self.assertIn("MISSING WAV", output)
-            self.assertIn("UNKNOWN tone check unavailable", output)
-            self.assertIn("unknown stop checks: 1", output)
+            self.assertIn("missing/absent streams: 1", output)
 
-    def test_start_tone_is_info_not_anomaly(self):
+    def test_expected_count_mismatch_reports_every_short_layer(self):
         with tempfile.TemporaryDirectory() as tmp:
             session_dir = Path(tmp)
-            build_session(
-                session_dir,
-                tone_offsets=[],
-                firmware_offsets=[],
-                app_stop_offsets=[],
-                start_tone_offsets=[0.90],
-            )
-
-            status, output = run_analyzer(session_dir)
-
-            self.assertEqual(status, 0, output)
-            self.assertIn("6 kHz START tone detected", output)
-            self.assertIn("6 kHz START tones: 1", output)
-            self.assertNotIn("ANOMALY unexpected START tone", output)
-            self.assertIn("anomalies: 0", output)
-
-    def test_latest_session_pattern_separates_unknown_and_inactive_stops(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            session_dir = Path(tmp)
-            precoverage_stops = [0.20 * index for index in range(1, 11)]
-            build_session(
-                session_dir,
-                tone_offsets=[5.80, 7.00],
-                firmware_offsets=precoverage_stops + [5.80, 7.00],
-                app_stop_offsets=[7.15],
-                activity_start_offsets=[6.60],
-                wav_start_offset=5.00,
-                expected_squeezes=12,
-            )
+            build_session(session_dir, expected_squeezes=2)
 
             status, output = run_analyzer(session_dir)
 
             self.assertEqual(status, 2, output)
-            self.assertIn("clean stop chains: 1", output)
-            self.assertIn("broken chains: 0", output)
-            self.assertIn("outside-WAV-coverage unknowns: 10", output)
-            self.assertIn("inactive-capture stops: 1", output)
-            self.assertIn("unknown stop checks: 10", output)
-            self.assertIn("observed firmware stop outcomes: 12", output)
-            self.assertIn("expected squeezes: 12", output)
-            self.assertIn("observed minus expected: +0", output)
-            self.assertNotIn("Mac detector missed app stop", output)
-
-    def test_cancel_and_monitor_stop_restore_known_inactive_state(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            session_dir = Path(tmp)
-            build_session(
-                session_dir,
-                tone_offsets=[1.00, 2.00],
-                firmware_offsets=[1.00, 2.00],
-                app_stop_offsets=[],
-                activity_start_offsets=[0.30, 1.30],
-                capture_cancel_offsets=[0.70],
-                monitor_stop_offsets=[1.70],
-            )
-
-            status, output = run_analyzer(session_dir)
-
-            self.assertEqual(status, 0, output)
-            self.assertIn("ting capture cancelled", output)
-            self.assertIn("ting audio monitor stopped", output)
-            self.assertIn("inactive-capture stops: 2", output)
-            self.assertIn("broken chains: 0", output)
-
-    def test_tone_matching_does_not_cross_unrelated_wav_coverage(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            session_dir = Path(tmp)
-            build_adjacent_wav_session(session_dir)
-
-            status, output = run_analyzer(session_dir)
-
-            self.assertEqual(status, 2, output)
-            self.assertIn("BROKEN fw-only: tone never reached audio", output)
-            self.assertIn("fw-only breaks (tone never reached audio): 1", output)
-            self.assertIn("clean stop chains: 0", output)
-
-    def test_stops_in_wav_anchor_uncertainty_are_ambiguous(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            session_dir = Path(tmp)
-            build_session(
-                session_dir,
-                tone_offsets=[],
-                firmware_offsets=[0.80, 2.20],
-                app_stop_offsets=[],
-                wav_start_offset=1.00,
-                wav_duration_seconds=1.00,
-            )
-
-            status, output = run_analyzer(session_dir)
-
-            self.assertEqual(status, 2, output)
-            self.assertEqual(output.count("UNKNOWN ambiguous raw WAV edge coverage"), 2, output)
-            self.assertIn("ambiguous-WAV-edge unknowns: 2", output)
-            self.assertIn("outside-WAV-coverage unknowns: 0", output)
-            self.assertIn("broken chains: 0", output)
-
-    def test_expected_squeeze_mismatch_is_anomaly(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            session_dir = Path(tmp)
-            build_session(
-                session_dir,
-                tone_offsets=[1.00],
-                firmware_offsets=[1.00],
-                app_stop_offsets=[1.15],
-                expected_squeezes=2,
-            )
-
-            status, output = run_analyzer(session_dir)
-
-            self.assertEqual(status, 2, output)
-            self.assertIn("observed firmware stop outcomes: 1", output)
-            self.assertIn("expected squeezes: 2", output)
-            self.assertIn("observed minus expected: -1", output)
             self.assertIn("ANOMALY expected squeeze count mismatch", output)
-            self.assertIn("anomalies: 1", output)
+            self.assertIn("firmware START=1", output)
+            self.assertIn("finalized capture=1", output)
+
+    def test_unmatched_app_event_fails_even_with_one_clean_chain(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(
+                session_dir,
+                app_starts=[(0.96, "marker"), (2.60, "level")],
+            )
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("ANOMALY unmatched app activity-start cause=level", output)
+            self.assertIn("unmatched app activity events: 1", output)
+
+    def test_crossed_start_and_stop_stages_cannot_pass_by_proximity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(
+                session_dir,
+                app_starts=[(1.94, "marker")],
+                app_stops=[(1.96, "marker")],
+            )
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("START/STOP lifecycle stages crossed", output)
+            self.assertIn("acceptance: FAIL", output)
+
+    def test_missing_serial_and_app_log_streams_fail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, missing_serial=True, missing_app_log=True)
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("missing serial.log", output)
+            self.assertIn("missing app-log.ndjson", output)
+            self.assertIn("missing/absent streams: 3", output)
+
+    def test_unmatched_finalized_capture_is_anomaly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            build_session(session_dir, finalized=[1.97, 3.00])
+
+            status, output = run_analyzer(session_dir)
+
+            self.assertEqual(status, 2, output)
+            self.assertIn("ANOMALY unmatched finalized capture", output)
+            self.assertIn("unmatched finalized captures: 1", output)
 
 
 def run_analyzer(session_dir):
@@ -231,33 +449,64 @@ def run_analyzer(session_dir):
 
 def build_session(
     session_dir,
-    tone_offsets,
-    firmware_offsets,
-    app_stop_offsets,
-    missing_wav=False,
-    start_tone_offsets=None,
-    activity_start_offsets=None,
-    capture_cancel_offsets=None,
-    monitor_stop_offsets=None,
+    firmware_pairs=UNSET,
+    firmware_markers=UNSET,
+    firmware_profiles=UNSET,
+    start_tones=UNSET,
+    stop_tones=UNSET,
+    app_starts=UNSET,
+    app_stops=UNSET,
+    finalized=UNSET,
+    cancellations=UNSET,
+    serial_errors=UNSET,
+    expected_squeezes=UNSET,
     wav_start_offset=0.0,
-    wav_duration_seconds=3.2,
-    expected_squeezes=None,
+    wav_duration_seconds=6.0,
+    missing_wav=False,
+    missing_serial=False,
+    missing_app_log=False,
 ):
     session_dir.mkdir(parents=True, exist_ok=True)
-    start_tone_offsets = start_tone_offsets or []
-    capture_cancel_offsets = capture_cancel_offsets or []
-    monitor_stop_offsets = monitor_stop_offsets or []
-    wav_path = session_dir / "ting-raw-20260707-212603.wav"
+    if firmware_pairs is UNSET:
+        firmware_pairs = [(1.0, 2.0)]
+    if firmware_markers is UNSET:
+        firmware_markers = [
+            marker
+            for start, stop in firmware_pairs
+            for marker in (("start", start), ("stop", stop))
+        ]
+    if firmware_profiles is UNSET:
+        firmware_profiles = ["v13"] * len(firmware_markers)
+    if len(firmware_profiles) != len(firmware_markers):
+        raise ValueError("firmware_profiles must align with firmware_markers")
+    if start_tones is UNSET:
+        start_tones = [start - 0.08 for start, _stop in firmware_pairs]
+    if stop_tones is UNSET:
+        stop_tones = [stop - 0.08 for _start, stop in firmware_pairs]
+    if app_starts is UNSET:
+        app_starts = [(start - 0.04, "marker") for start, _stop in firmware_pairs]
+    if app_stops is UNSET:
+        app_stops = [(stop - 0.04, "marker") for _start, stop in firmware_pairs]
+    if finalized is UNSET:
+        finalized = [stop - 0.03 for _start, stop in firmware_pairs]
+    if cancellations is UNSET:
+        cancellations = []
+    if serial_errors is UNSET:
+        serial_errors = []
+    if expected_squeezes is UNSET:
+        expected_squeezes = len(firmware_pairs)
+
+    wav_path = session_dir / "ting-raw-acceptance.wav"
     if not missing_wav:
         samples = speech_like_audio(SAMPLE_RATE, wav_duration_seconds, seed=707)
-        for offset_seconds in start_tone_offsets:
+        for offset_seconds in start_tones:
             render_marker(
                 samples,
                 int(round((offset_seconds - wav_start_offset) * SAMPLE_RATE)),
                 START_FREQUENCY,
                 sample_rate=SAMPLE_RATE,
             )
-        for offset_seconds in tone_offsets:
+        for offset_seconds in stop_tones:
             render_marker(
                 samples,
                 int(round((offset_seconds - wav_start_offset) * SAMPLE_RATE)),
@@ -266,90 +515,112 @@ def build_session(
             )
         write_pcm16_wav(wav_path, samples, sample_rate=SAMPLE_RATE)
 
-    serial_lines = []
-    for index, offset_seconds in enumerate(firmware_offsets, start=1):
-        ticks_ms = 100_000 + int(round(offset_seconds * 1000))
-        serial_lines.append(
-            "{:.6f} TING {} marker stop v={}\n".format(
-                BASE_TIME + offset_seconds,
-                ticks_ms,
-                3400 + index,
+    if not missing_serial:
+        serial_entries = []
+        for index, ((kind, offset_seconds), profile) in enumerate(
+            zip(firmware_markers, firmware_profiles),
+            start=1,
+        ):
+            ticks_ms = 100_000 + int(round(offset_seconds * 1000))
+            profile_text = " profile={}".format(profile) if profile is not None else ""
+            serial_entries.append(
+                (
+                    offset_seconds,
+                    "{:.6f} TING {} marker {}{} v={}\n".format(
+                        BASE_TIME + offset_seconds,
+                        ticks_ms,
+                        kind,
+                        profile_text,
+                        900 + index,
+                    ),
+                )
             )
+        for offset_seconds, message in serial_errors:
+            serial_entries.append(
+                (offset_seconds, "{:.6f} {}\n".format(BASE_TIME + offset_seconds, message))
+            )
+        serial_entries.sort(key=lambda entry: entry[0])
+        (session_dir / "serial.log").write_text(
+            "".join(line for _offset, line in serial_entries),
+            encoding="utf-8",
         )
-    (session_dir / "serial.log").write_text("".join(serial_lines), encoding="utf-8")
 
-    app_records = [
-        log_record(BASE_TIME + wav_start_offset, "ting audio monitor started"),
-        log_record(BASE_TIME + wav_start_offset, "ting raw dump path={}".format(wav_path)),
-        log_record(BASE_TIME + 0.25, "ting levels window_s=0.500 peak_dbfs=-22.0"),
-    ]
-    if activity_start_offsets is None:
-        activity_start_offsets = [
-            max(0.05, offset_seconds - 0.35)
-            for offset_seconds in firmware_offsets or ([0.70] if app_stop_offsets else [])
+    if not missing_app_log:
+        app_records = [
+            log_record(BASE_TIME + wav_start_offset, "ting raw dump path={}".format(wav_path)),
+            log_record(BASE_TIME + wav_start_offset + 0.01, "ting audio monitor started"),
+            log_record(BASE_TIME + wav_start_offset + 0.25, "ting levels window_s=0.500 peak_dbfs=-22.0"),
         ]
-    for offset_seconds in activity_start_offsets:
-        app_records.append(log_record(BASE_TIME + offset_seconds, "ting activity started level_dbfs=-29.0"))
-    for offset_seconds in app_stop_offsets:
-        app_records.append(log_record(BASE_TIME + offset_seconds, "ting activity stopped level_dbfs=-54.0"))
-        app_records.append(log_record(BASE_TIME + offset_seconds + 0.05, "ting capture finalized duration_s=0.800"))
-    for offset_seconds in capture_cancel_offsets:
-        app_records.append(log_record(BASE_TIME + offset_seconds, "ting capture cancelled"))
-    for offset_seconds in monitor_stop_offsets:
-        app_records.append(log_record(BASE_TIME + offset_seconds, "ting audio monitor stopped"))
-    app_records.sort(key=lambda record: record["timestamp"])
-    with (session_dir / "app-log.ndjson").open("w", encoding="utf-8") as handle:
-        for record in app_records:
-            handle.write(json.dumps(record, sort_keys=True))
-            handle.write("\n")
+        for offset_seconds, cause in app_starts:
+            app_records.append(
+                log_record(
+                    BASE_TIME + offset_seconds,
+                    activity_message("started", -29.0, cause),
+                )
+            )
+        for offset_seconds, cause in app_stops:
+            app_records.append(
+                log_record(
+                    BASE_TIME + offset_seconds,
+                    activity_message("stopped", -54.0, cause),
+                )
+            )
+        for offset_seconds in finalized:
+            app_records.append(
+                log_record(BASE_TIME + offset_seconds, "ting capture finalized duration_s=0.800")
+            )
+        for offset_seconds in cancellations:
+            app_records.append(log_record(BASE_TIME + offset_seconds, "ting capture cancelled"))
+        app_records.sort(key=lambda record: record["timestamp"])
+        with (session_dir / "app-log.ndjson").open("w", encoding="utf-8") as handle:
+            for record in app_records:
+                handle.write(json.dumps(record, sort_keys=True))
+                handle.write("\n")
 
     meta = {
         "session_start_epoch": BASE_TIME,
         "serial_device": "/dev/cu.usbmodemTEST",
+        "completion_reason": "user_interrupt",
+        "status": "captured",
+        "preflight": {
+            "expected_squeeze_count": {"result": "pass"},
+            "serial": {"result": "pass"},
+            "required_settings": {"result": "pass"},
+            "repository": {"result": "pass"},
+            "installed_app": {"result": "pass"},
+            "cable_creation_input": {"result": "pass"},
+            "firmware": {"result": "pass"},
+            "raw_wav": {"result": "pass"},
+        },
+        "artifact_integrity": {
+            "result": "pass",
+            "errors": [],
+        },
     }
     if expected_squeezes is not None:
         meta["expected_squeezes"] = expected_squeezes
     (session_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
 
 
-def build_adjacent_wav_session(session_dir):
-    session_dir.mkdir(parents=True, exist_ok=True)
-    first_wav = session_dir / "ting-raw-first.wav"
-    second_wav = session_dir / "ting-raw-second.wav"
+def read_meta(session_dir):
+    return json.loads((session_dir / "meta.json").read_text(encoding="utf-8"))
 
-    first_samples = speech_like_audio(SAMPLE_RATE, 1.0, seed=101)
-    render_marker(
-        first_samples,
-        int(round(0.75 * SAMPLE_RATE)),
-        STOP_FREQUENCY,
-        sample_rate=SAMPLE_RATE,
-    )
-    write_pcm16_wav(first_wav, first_samples, sample_rate=SAMPLE_RATE)
-    write_pcm16_wav(
-        second_wav,
-        speech_like_audio(SAMPLE_RATE, 2.0, seed=202),
-        sample_rate=SAMPLE_RATE,
-    )
 
-    (session_dir / "serial.log").write_text(
-        "{:.6f} TING 101200 marker stop v=3401\n".format(BASE_TIME + 1.20),
-        encoding="utf-8",
-    )
-    app_records = [
-        log_record(BASE_TIME, "ting raw dump path={}".format(first_wav)),
-        log_record(BASE_TIME + 0.01, "ting audio monitor started"),
-        log_record(BASE_TIME + 1.10, "ting raw dump path={}".format(second_wav)),
-        log_record(BASE_TIME + 1.15, "ting activity started level_dbfs=-29.0"),
-        log_record(BASE_TIME + 1.35, "ting activity stopped level_dbfs=-54.0"),
-    ]
-    with (session_dir / "app-log.ndjson").open("w", encoding="utf-8") as handle:
-        for record in app_records:
-            handle.write(json.dumps(record, sort_keys=True))
-            handle.write("\n")
-    (session_dir / "meta.json").write_text(
-        json.dumps({"session_start_epoch": BASE_TIME}),
-        encoding="utf-8",
-    )
+def write_meta(session_dir, meta):
+    (session_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+
+def update_meta(session_dir, **updates):
+    meta = read_meta(session_dir)
+    meta.update(updates)
+    write_meta(session_dir, meta)
+
+
+def activity_message(action, level, cause):
+    message = "ting activity {} level_dbfs={:.1f}".format(action, level)
+    if cause is not None:
+        message += " cause={}".format(cause)
+    return message
 
 
 def log_record(epoch, message):

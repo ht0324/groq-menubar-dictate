@@ -399,7 +399,8 @@ final class AudioActivityCaptureService: @unchecked Sendable {
         ) {
         case .started:
             isCapturing = true
-            logger.notice("ting activity started level_dbfs=\(level, format: .fixed(precision: 1), privacy: .public)")
+            let startedByMarker = detector.activeStartMarker != nil
+            logger.notice("ting activity started level_dbfs=\(level, format: .fixed(precision: 1), privacy: .public) cause=\(startedByMarker ? "marker" : "level", privacy: .public)")
             onCaptureStarted?()
         case .stopped:
             let stoppedByMarker = detector.lastStopMarker != nil
@@ -443,13 +444,13 @@ final class AudioActivityCaptureService: @unchecked Sendable {
         }
 
         let durationSeconds = Double(samples.count / Self.bytesPerSample) / Double(Self.outputSampleRate)
-        logger.notice("ting capture finalized duration_s=\(durationSeconds, format: .fixed(precision: 2), privacy: .public) trim_tail_s=\(trimTailSeconds, format: .fixed(precision: 2), privacy: .public)")
         let fileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("dictation-\(UUID().uuidString)")
             .appendingPathExtension("wav")
         do {
             try PCM16WAVEncoder.wavData(pcm16: samples, sampleRate: Self.outputSampleRate)
                 .write(to: fileURL, options: .atomic)
+            logger.notice("ting capture finalized duration_s=\(durationSeconds, format: .fixed(precision: 2), privacy: .public) trim_tail_s=\(trimTailSeconds, format: .fixed(precision: 2), privacy: .public)")
         } catch {
             onMonitorError?("Failed to save ting recording: \(error.localizedDescription)")
             return

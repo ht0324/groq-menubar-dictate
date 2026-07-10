@@ -63,17 +63,46 @@ TINGDISK to return to the stock frozen firmware.
 
 ## Record an acceptance run
 
-Enable the Ting audio trigger and raw dumps, restart the app, and connect the
-Ting USB serial device. Then record a named session with an optional expected
-squeeze count:
+The mic dongle and Ting USB connection only need to be present for a physical
+run. Before recording:
+
+- install and launch the clean repository commit under `/Applications`;
+- connect the `Cable Creation` input and the Ting USB serial device so
+  `TINGDISK` is mounted;
+- deploy the current v13 profile and marker assets; and
+- enable the Ting audio trigger, raw dumps, and performance diagnostics.
+
+Start with a three-squeeze smoke run. The positive expected count is required:
+
+```bash
+./ting/flightrec/record.sh v13-smoke 3
+```
+
+The recorder verifies the serial port is not already owned, the installed app
+matches the clean repository commit, the connected audio input is present, and
+the mounted firmware and marker assets match the tracked v13 files. It then
+restarts the already-enabled app to create a session-owned raw WAV and proves
+that the stream is growing before it prints `recording`. It never changes app
+preferences or deploys firmware.
+
+Keep every squeeze active for at least 0.5 seconds. After the expected final
+capture finishes, press Control-C. The recorder closes and copies the bounded
+WAV, restores the running app, and invokes the analyzer automatically. If more
+than one `/dev/cu.usbmodem*` device is attached, select the Ting explicitly:
+
+```bash
+./ting/flightrec/record.sh --serial /dev/cu.usbmodemXXXX v13-smoke 3
+```
+
+Only after the smoke run passes should you record the full acceptance session:
 
 ```bash
 ./ting/flightrec/record.sh v13-acceptance 30
 ```
 
-The recorder stores the app build, repository state, firmware hashes, trigger
-settings, serial telemetry, app logs, and captured WAV paths in the session
-metadata. Generated sessions remain local under `ting/flightrec/sessions/`.
+Each session stores app/repository/firmware provenance, configured trigger
+settings, preflight results, serial telemetry, app logs, raw-WAV coverage, and
+copied artifacts under `ting/flightrec/sessions/`.
 
 Analyze a saved session with:
 
@@ -81,8 +110,15 @@ Analyze a saved session with:
 python3 ting/flightrec/analyze.py ting/flightrec/sessions/<session-name>
 ```
 
-The analyzer currently proves the release path: an acceptance run should have
-no broken stop chains, no phantom stop tones, no unexplained level fallbacks,
-and an observed firmware-stop count matching the expected squeeze count. It
-reports 6 kHz start-tone counts separately; for the current profile, also
-confirm that count matches the expected squeezes.
+Acceptance requires exactly one complete marker-driven lifecycle per expected
+squeeze:
+
+```text
+firmware START -> 6 kHz tone -> app START cause=marker
+               -> firmware STOP -> 7 kHz tone -> app STOP cause=marker
+               -> finalized capture
+```
+
+The run fails on count mismatches, missing or wrong firmware profiles, level
+fallbacks, inactive stops, cancellations, phantom or unmatched events, unknown
+WAV coverage, serial errors, failed recorder integrity, or missing streams.

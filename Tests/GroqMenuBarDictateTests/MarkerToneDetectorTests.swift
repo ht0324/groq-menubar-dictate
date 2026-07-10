@@ -83,6 +83,7 @@ final class MarkerToneDetectorTests: XCTestCase {
             ),
             .started
         )
+        XCTAssertEqual(detector.activeStartMarker?.kind, .start)
 
         let speech = pcmData(from: speechLikeAudio(durationSeconds: 0.2, seed: 303))
         let speechLevel = AudioActivityCaptureService.levelDBFS(pcm16: speech)!
@@ -231,6 +232,7 @@ final class MarkerToneDetectorTests: XCTestCase {
 
         XCTAssertNil(detector.process(levelDBFS: -30, timestamp: 0.00))
         XCTAssertEqual(detector.process(levelDBFS: -30, timestamp: 0.10), .started)
+        XCTAssertNil(detector.activeStartMarker)
         XCTAssertNil(detector.process(levelDBFS: -90, timestamp: 1.00))
         XCTAssertEqual(detector.process(levelDBFS: -90, timestamp: 1.30), .stopped)
     }
