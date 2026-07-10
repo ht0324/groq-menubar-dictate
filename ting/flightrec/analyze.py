@@ -30,9 +30,11 @@ WAV_ANCHOR_UNCERTAINTY_SECONDS = 0.3
 
 RAW_DUMP_PREFIX = "ting raw dump path="
 APP_MONITOR_STARTED = "ting audio monitor started"
+APP_MONITOR_STOPPED = "ting audio monitor stopped"
 APP_ACTIVITY_STARTED = "ting activity started level_dbfs="
 APP_ACTIVITY_STOPPED = "ting activity stopped level_dbfs="
 APP_CAPTURE_FINALIZED = "ting capture finalized duration_s="
+APP_CAPTURE_CANCELLED = "ting capture cancelled"
 APP_LEVELS = "ting levels window_s="
 
 SERIAL_LINE_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s+(.*)$")
@@ -74,6 +76,27 @@ class RawDump:
     source_path: str
     event: EventLine
     resolved_path: Path | None = None
+    sample_count: int = 0
+    sample_rate: int | None = None
+    duration_seconds: float | None = None
+    coverage_start: float | None = None
+    coverage_end: float | None = None
+
+    def covers(self, timestamp: float) -> bool:
+        return (
+            self.coverage_start is not None
+            and self.coverage_end is not None
+            and self.coverage_start <= timestamp <= self.coverage_end
+        )
+
+    def is_within_anchor_uncertainty(self, timestamp: float) -> bool:
+        if self.coverage_start is None or self.coverage_end is None:
+            return False
+        return not self.covers(timestamp) and (
+            self.coverage_start - WAV_ANCHOR_UNCERTAINTY_SECONDS
+            <= timestamp
+            <= self.coverage_end + WAV_ANCHOR_UNCERTAINTY_SECONDS
+        )
 
 
 @dataclass
@@ -84,6 +107,7 @@ class ToneDetection:
     frequency: int
     score: float
     wav_path: Path
+    raw_dump: RawDump
     event: EventLine
     matched_fw: FirmwareStop | None = None
 
@@ -97,10 +121,12 @@ class ParsedSession:
     tones: list[ToneDetection] = field(default_factory=list)
     app_starts: list[AppEvent] = field(default_factory=list)
     app_stops: list[AppEvent] = field(default_factory=list)
+    app_state_events: list[AppEvent] = field(default_factory=list)
     app_log_present: bool = False
     serial_present: bool = False
     usable_wav_count: int = 0
     missing_streams: int = 0
+    expected_squeezes: int | None = None
     sequence: int = 0
 
     def add_event(self, timestamp, source, description, verdict="INFO"):
@@ -122,6 +148,7 @@ def main(argv=None):
         print("session directory not found: {}".format(session_dir))
         return 2
 
+    parse_meta(parsed)
     parse_serial(parsed)
     parse_app_log(parsed)
     detect_wav_tones(parsed)
@@ -135,6 +162,25 @@ def main(argv=None):
     ):
         return 0
     return 2
+
+
+def parse_meta(parsed):
+    meta_path = parsed.session_dir / "meta.json"
+    if not meta_path.exists():
+        return
+    try:
+        with meta_path.open("r", encoding="utf-8") as handle:
+            meta = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return
+
+    expected_squeezes = meta.get("expected_squeezes")
+    if (
+        isinstance(expected_squeezes, int)
+        and not isinstance(expected_squeezes, bool)
+        and expected_squeezes >= 0
+    ):
+        parsed.expected_squeezes = expected_squeezes
 
 
 def parse_serial(parsed):
@@ -215,11 +261,24 @@ def parse_app_log(parsed):
                 parsed.raw_dumps.append(RawDump(timestamp, source_path, event))
             elif APP_ACTIVITY_STARTED in message:
                 event = parsed.add_event(timestamp, "app-log", message, "INFO level-triggered start")
-                parsed.app_starts.append(AppEvent(timestamp, "start", message, event))
+                app_event = AppEvent(timestamp, "activity-start", message, event)
+                parsed.app_starts.append(app_event)
+                parsed.app_state_events.append(app_event)
             elif APP_ACTIVITY_STOPPED in message:
                 event = parsed.add_event(timestamp, "app-log", message, "PENDING")
-                parsed.app_stops.append(AppEvent(timestamp, "stop", message, event))
-            elif APP_MONITOR_STARTED in message or APP_CAPTURE_FINALIZED in message or APP_LEVELS in message:
+                app_event = AppEvent(timestamp, "activity-stop", message, event)
+                parsed.app_stops.append(app_event)
+                parsed.app_state_events.append(app_event)
+            elif APP_MONITOR_STARTED in message:
+                event = parsed.add_event(timestamp, "app-log", message, "INFO")
+                parsed.app_state_events.append(AppEvent(timestamp, "monitor-start", message, event))
+            elif APP_MONITOR_STOPPED in message:
+                event = parsed.add_event(timestamp, "app-log", message, "INFO")
+                parsed.app_state_events.append(AppEvent(timestamp, "monitor-stop", message, event))
+            elif APP_CAPTURE_CANCELLED in message:
+                event = parsed.add_event(timestamp, "app-log", message, "INFO")
+                parsed.app_state_events.append(AppEvent(timestamp, "capture-cancelled", message, event))
+            elif APP_CAPTURE_FINALIZED in message or APP_LEVELS in message:
                 parsed.add_event(timestamp, "app-log", message, "INFO")
 
 
@@ -297,6 +356,21 @@ def detect_wav_tones(parsed):
             continue
 
         parsed.usable_wav_count += 1
+        raw_dump.sample_count = len(samples)
+        raw_dump.sample_rate = sample_rate
+        raw_dump.duration_seconds = len(samples) / float(sample_rate)
+        if raw_dump.timestamp is not None:
+            raw_dump.coverage_start = raw_dump.timestamp
+            raw_dump.coverage_end = raw_dump.timestamp + raw_dump.duration_seconds
+            raw_dump.event.description = (
+                "raw dump path={} duration_s={:.3f} coverage_end={} "
+                "(sample 0 anchor +/-{:.1f}s)"
+            ).format(
+                raw_dump.source_path,
+                raw_dump.duration_seconds,
+                format_timestamp(raw_dump.coverage_end),
+                WAV_ANCHOR_UNCERTAINTY_SECONDS,
+            )
         if sample_rate != SAMPLE_RATE:
             parsed.add_event(
                 raw_dump.timestamp,
@@ -340,6 +414,7 @@ def detect_wav_tones(parsed):
                     int(detection.frequency),
                     detection.score,
                     wav_path,
+                    raw_dump,
                     event,
                 )
             )
@@ -398,6 +473,23 @@ def cross_check(parsed):
     unknown_checks = 0
     phantom_tones = 0
     level_fallback_stops = 0
+    outside_coverage_unknowns = 0
+    ambiguous_coverage_unknowns = 0
+    inactive_stops = 0
+
+    if (
+        parsed.expected_squeezes is not None
+        and len(parsed.firmware_stops) != parsed.expected_squeezes
+    ):
+        parsed.add_event(
+            None,
+            "meta",
+            "expected squeezes={} observed firmware stops={}".format(
+                parsed.expected_squeezes,
+                len(parsed.firmware_stops),
+            ),
+            "ANOMALY expected squeeze count mismatch",
+        )
 
     for fw_stop in parsed.firmware_stops:
         if parsed.usable_wav_count == 0:
@@ -405,7 +497,25 @@ def cross_check(parsed):
             unknown_checks += 1
             continue
 
-        tone = nearest_stop_tone(fw_stop, stop_tones)
+        relevant_raw_dumps = [
+            raw_dump
+            for raw_dump in parsed.raw_dumps
+            if raw_dump.covers(fw_stop.timestamp)
+        ]
+        if not relevant_raw_dumps:
+            if any(
+                raw_dump.is_within_anchor_uncertainty(fw_stop.timestamp)
+                for raw_dump in parsed.raw_dumps
+            ):
+                fw_stop.event.verdict = "UNKNOWN ambiguous raw WAV edge coverage"
+                ambiguous_coverage_unknowns += 1
+            else:
+                fw_stop.event.verdict = "UNKNOWN outside raw WAV coverage"
+                outside_coverage_unknowns += 1
+            unknown_checks += 1
+            continue
+
+        tone = nearest_stop_tone(fw_stop, stop_tones, relevant_raw_dumps)
         if tone is None:
             fw_stop.event.verdict = "BROKEN fw-only: tone never reached audio"
             broken_tone += 1
@@ -418,6 +528,12 @@ def cross_check(parsed):
         if not parsed.app_log_present:
             fw_stop.event.verdict = "UNKNOWN app log unavailable"
             unknown_checks += 1
+            continue
+
+        if capture_state_at(parsed, fw_stop.timestamp) is False:
+            fw_stop.event.verdict = "INFO fw+tone: capture inactive; no app stop expected"
+            tone.event.verdict = "OK matched firmware marker stop; capture inactive"
+            inactive_stops += 1
             continue
 
         app_stop = nearest_app_stop_after_fw(fw_stop, parsed.app_stops)
@@ -437,7 +553,14 @@ def cross_check(parsed):
     for tone in stop_tones:
         if tone.matched_fw is not None:
             continue
-        if not any(abs(tone.timestamp - fw.timestamp) <= FW_TONE_WINDOW_SECONDS for fw in parsed.firmware_stops):
+        if not any(
+            (
+                tone.raw_dump.covers(fw.timestamp)
+                or tone.raw_dump.is_within_anchor_uncertainty(fw.timestamp)
+            )
+            and abs(tone.timestamp - fw.timestamp) <= FW_TONE_WINDOW_SECONDS
+            for fw in parsed.firmware_stops
+        ):
             tone.event.verdict = "ANOMALY phantom tone: no firmware marker stop"
             phantom_tones += 1
         else:
@@ -474,21 +597,44 @@ def cross_check(parsed):
         "broken_app": broken_app,
         "phantom_tones": phantom_tones,
         "level_fallback_stops": level_fallback_stops,
+        "outside_coverage_unknowns": outside_coverage_unknowns,
+        "ambiguous_coverage_unknowns": ambiguous_coverage_unknowns,
+        "inactive_stops": inactive_stops,
         "start_tones": start_tones_seen,
         "anomalies": anomalies,
         "unknown_checks": unknown_checks,
     }
 
 
-def nearest_stop_tone(fw_stop, stop_tones):
+def nearest_stop_tone(fw_stop, stop_tones, relevant_raw_dumps):
     candidates = [
         tone
         for tone in stop_tones
-        if tone.matched_fw is None and abs(tone.timestamp - fw_stop.timestamp) <= FW_TONE_WINDOW_SECONDS
+        if tone.matched_fw is None
+        and any(tone.raw_dump is raw_dump for raw_dump in relevant_raw_dumps)
+        and abs(tone.timestamp - fw_stop.timestamp) <= FW_TONE_WINDOW_SECONDS
     ]
     if not candidates:
         return None
     return min(candidates, key=lambda tone: abs(tone.timestamp - fw_stop.timestamp))
+
+
+def capture_state_at(parsed, timestamp):
+    active = None
+    state_events = sorted(
+        (
+            event
+            for event in parsed.app_state_events
+            if event.timestamp is not None and event.timestamp <= timestamp
+        ),
+        key=lambda event: (event.timestamp, event.event.sequence),
+    )
+    for event in state_events:
+        if event.kind == "activity-start":
+            active = True
+        elif event.kind in ("monitor-start", "monitor-stop", "activity-stop", "capture-cancelled"):
+            active = False
+    return active
 
 
 def nearest_app_stop_after_fw(fw_stop, app_stops):
@@ -532,8 +678,16 @@ def print_report(parsed, summary):
     print("fw+tone breaks (Mac detector missed it): {}".format(summary["broken_app"]))
     print("phantom tones: {}".format(summary["phantom_tones"]))
     print("level-fallback stops: {}".format(summary["level_fallback_stops"]))
+    print("outside-WAV-coverage unknowns: {}".format(summary["outside_coverage_unknowns"]))
+    print("ambiguous-WAV-edge unknowns: {}".format(summary["ambiguous_coverage_unknowns"]))
+    print("inactive-capture stops: {}".format(summary["inactive_stops"]))
     print("6 kHz START tones: {}".format(summary["start_tones"]))
     print("unknown stop checks: {}".format(summary["unknown_checks"]))
+    print("observed firmware stop outcomes: {}".format(len(parsed.firmware_stops)))
+    if parsed.expected_squeezes is not None:
+        delta = len(parsed.firmware_stops) - parsed.expected_squeezes
+        print("expected squeezes: {}".format(parsed.expected_squeezes))
+        print("observed minus expected: {:+d}".format(delta))
     print("missing/absent streams: {}".format(parsed.missing_streams))
     print("anomalies: {}".format(summary["anomalies"]))
 

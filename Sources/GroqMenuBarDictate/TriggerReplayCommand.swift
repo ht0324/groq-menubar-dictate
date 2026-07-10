@@ -138,9 +138,7 @@ enum TriggerReplayCommand {
             Int((Double(sampleRate) * Double(options.chunkMilliseconds) / 1_000.0).rounded())
         )
         let chunkByteCount = chunkSampleCount * bytesPerSample
-        let configuration = options.useSettings
-            ? SettingsStore().audioActivityTriggerConfiguration
-            : AudioActivityTriggerConfiguration()
+        let configuration = triggerConfiguration(useSettings: options.useSettings)
         var detector = AudioActivityTriggerDetector(configuration: configuration)
         var markerDetector = MarkerToneDetector(configuration: configuration.markerToneConfiguration)
         var offset = 0
@@ -205,8 +203,75 @@ enum TriggerReplayCommand {
             markerStopCount: &markerStopCount
         )
         let duration = Double(pcm16.count / bytesPerSample) / Double(sampleRate)
+        if let event = flushTriggerDetectorAtEndOfStream(
+            detector: &detector,
+            configuration: configuration,
+            totalSampleCount: totalSamples,
+            timestamp: duration
+        ) {
+            let level = -140.0
+            switch event {
+            case .started:
+                captureCount += 1
+                captureStartTimestamp = duration
+                print("t=\(formatSeconds(duration)) event=started level_dbfs=\(formatDBFS(level))")
+            case .stopped:
+                let cause = detector.lastStopMarker == nil ? "level" : "marker"
+                let captureDuration = captureStartTimestamp.map { max(0, duration - $0) } ?? 0
+                captureStartTimestamp = nil
+                print(
+                    "t=\(formatSeconds(duration)) event=stopped level_dbfs=\(formatDBFS(level)) cause=\(cause) duration_s=\(formatSeconds(captureDuration))"
+                )
+            }
+        }
         print(
             "summary duration_s=\(formatSeconds(duration)) captures=\(captureCount) marker_start_events=\(markerStartCount) marker_stop_events=\(markerStopCount)"
+        )
+    }
+
+    static func triggerConfiguration(
+        useSettings: Bool,
+        defaultsProvider: (String) -> UserDefaults? = { UserDefaults(suiteName: $0) }
+    ) -> AudioActivityTriggerConfiguration {
+        guard useSettings,
+              let defaults = defaultsProvider(AppConfig.bundleIdentifier)
+        else {
+            return AudioActivityTriggerConfiguration()
+        }
+        return SettingsStore(defaults: defaults).audioActivityTriggerConfiguration
+    }
+
+    static func flushTriggerDetectorAtEndOfStream(
+        detector: inout AudioActivityTriggerDetector,
+        configuration: AudioActivityTriggerConfiguration,
+        totalSampleCount: Int,
+        timestamp: TimeInterval
+    ) -> AudioActivityTriggerEvent? {
+        let markerConfiguration = configuration.markerToneConfiguration
+        let markerBlockSampleCount = max(
+            16,
+            Int(
+                (
+                    Double(max(1, markerConfiguration.sampleRate))
+                        * max(0.001, markerConfiguration.blockDurationSeconds)
+                ).rounded()
+            )
+        )
+        let pendingSampleCount = totalSampleCount % markerBlockSampleCount
+        guard pendingSampleCount > 0 else {
+            return nil
+        }
+
+        let paddingSampleCount = markerBlockSampleCount - pendingSampleCount
+        let padding = Data(repeating: 0, count: paddingSampleCount * bytesPerSample)
+        guard let level = AudioActivityCaptureService.levelDBFS(pcm16: padding) else {
+            return nil
+        }
+        return detector.process(
+            pcm16: padding,
+            levelDBFS: level,
+            timestamp: timestamp,
+            startingAtSampleIndex: totalSampleCount
         )
     }
 

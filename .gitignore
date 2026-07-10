@@ -12,3 +12,12 @@ DerivedData/
 /testfile.m4a
 /.tmp-swiftpm-cache
 /dist
+
+# Local Ting hardware references and generated diagnostic evidence
+/ting/.DS_Store
+/ting/**/__pycache__/
+/ting/flightrec/sessions/
+/ting/ep-2350_firmware_1_0_8/
+/ting/*.uf2
+/ting/*.pdf
+/ting/main_1_0_8_extracted.py

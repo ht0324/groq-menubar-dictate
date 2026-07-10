@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Usage: ./record.sh [session-name] [expected-squeezes]
+# Captures serial telemetry, app logs, raw audio, and reproducibility metadata.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,9 +9,15 @@ APP_DOMAIN="com.huntae.groq-menubar-dictate"
 RAW_DUMP_KEY="settings.audioTriggerRawDumpEnabled"
 
 session_name="${1:-}"
+expected_squeezes="${2:-}"
 safe_name=""
 if [[ -n "${session_name}" ]]; then
     safe_name="$(printf '%s' "${session_name}" | tr -cs 'A-Za-z0-9._-' '-' | sed 's/^-//; s/-$//')"
+fi
+if [[ -n "${expected_squeezes}" && ! "${expected_squeezes}" =~ ^[0-9]+$ ]]; then
+    echo "expected squeeze count must be a non-negative integer" >&2
+    echo "usage: $0 [session-name] [expected-squeezes]" >&2
+    exit 2
 fi
 
 serial_devices=(/dev/cu.usbmodem*)
@@ -49,15 +57,107 @@ copied_paths_file="${session_dir}/.copied-wavs.txt"
 : > "${copied_paths_file}"
 : > "${session_dir}/serial.log"
 
-python3 - "${meta_path}" "${session_start_epoch}" "${serial_device}" "${session_name}" <<'PY'
+repo_root="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+python3 - \
+    "${meta_path}" \
+    "${session_start_epoch}" \
+    "${serial_device}" \
+    "${session_name}" \
+    "${expected_squeezes}" \
+    "${repo_root}" \
+    "${APP_DOMAIN}" <<'PY'
+import hashlib
 import json
+import plistlib
+import re
+import subprocess
 import sys
+from pathlib import Path
 
-meta_path, start_epoch, serial_device, session_name = sys.argv[1:5]
+
+(
+    meta_path,
+    start_epoch,
+    serial_device,
+    session_name,
+    expected_squeezes,
+    repo_root,
+    app_domain,
+) = sys.argv[1:8]
+repo_root = Path(repo_root)
+
+
+def command_output(arguments):
+    result = subprocess.run(arguments, capture_output=True, text=True, check=False)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def defaults_value(key):
+    return command_output(["defaults", "read", app_domain, key])
+
+
+def file_details(path):
+    path = Path(path)
+    if not path.is_file():
+        return {"path": str(path), "present": False}
+    payload = path.read_bytes()
+    first_line = payload.splitlines()[0].decode("utf-8", errors="replace") if payload else ""
+    version_match = re.search(r"\bv(\d+)\b", first_line)
+    return {
+        "path": str(path),
+        "present": True,
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "version": "v{}".format(version_match.group(1)) if version_match else None,
+    }
+
+
+def installed_app_details():
+    bundle_path = Path("/Applications/Groq MenuBar Dictate.app")
+    info_path = bundle_path / "Contents" / "Info.plist"
+    details = {"path": str(bundle_path), "present": info_path.is_file()}
+    if not info_path.is_file():
+        return details
+    try:
+        with info_path.open("rb") as handle:
+            info = plistlib.load(handle)
+    except (OSError, plistlib.InvalidFileException):
+        return details
+    details.update({
+        "version": info.get("CFBundleShortVersionString"),
+        "build": info.get("CFBundleVersion"),
+        "git_commit": info.get("GMDGitCommit"),
+        "git_branch": info.get("GMDGitBranch"),
+        "git_dirty": info.get("GMDGitDirty"),
+        "build_date": info.get("GMDBuildDate"),
+    })
+    return details
+
+
+trigger_keys = [
+    "settings.audioActivityTriggerEnabled",
+    "settings.audioTriggerStartThresholdDBFS",
+    "settings.audioTriggerStopThresholdDBFS",
+    "settings.audioTriggerStopHoldSeconds",
+    "settings.audioTriggerPreRollSeconds",
+    "settings.audioTriggerRawDumpEnabled",
+    "settings.microphoneInputMode",
+    "settings.performanceDiagnosticsEnabled",
+]
+expected_value = int(expected_squeezes) if expected_squeezes else None
 meta = {
     "session_start_epoch": float(start_epoch),
     "serial_device": serial_device,
     "session_name": session_name,
+    "expected_squeezes": expected_value,
+    "provenance": {
+        "repo_commit": command_output(["git", "-C", str(repo_root), "rev-parse", "HEAD"]),
+        "repo_dirty": command_output(["git", "-C", str(repo_root), "status", "--porcelain"]) not in (None, ""),
+        "installed_app": installed_app_details(),
+        "local_firmware": file_details(repo_root / "ting" / "user.py"),
+        "deployed_firmware": file_details("/Volumes/TINGDISK/user.py"),
+        "app_domain": app_domain,
+        "trigger_settings": {key: defaults_value(key) for key in trigger_keys},
+    },
     "status": "recording",
 }
 with open(meta_path, "w", encoding="utf-8") as handle:
@@ -240,7 +340,12 @@ with open(raw_paths_file, "r", encoding="utf-8") as handle:
 with open(copied_paths_file, "r", encoding="utf-8") as handle:
     copied_wavs = [line.strip() for line in handle if line.strip()]
 
-meta = {
+try:
+    with open(meta_path, "r", encoding="utf-8") as handle:
+        meta = json.load(handle)
+except (OSError, json.JSONDecodeError):
+    meta = {}
+meta.update({
     "session_start_epoch": float(start_epoch),
     "session_end_epoch": float(end_epoch),
     "duration_seconds": float(duration_seconds),
@@ -249,7 +354,7 @@ meta = {
     "raw_dump_source_paths": raw_paths,
     "copied_wavs": copied_wavs,
     "status": "finished",
-}
+})
 with open(meta_path, "w", encoding="utf-8") as handle:
     json.dump(meta, handle, indent=2, sort_keys=True)
     handle.write("\n")
@@ -264,6 +369,9 @@ trap finish INT TERM EXIT
 
 echo "session: ${session_dir}"
 echo "serial: ${serial_device}"
+if [[ -n "${expected_squeezes}" ]]; then
+    echo "expected squeezes: ${expected_squeezes}"
+fi
 echo "recording — do your test squeezes, Ctrl-C to finish"
 
 while kill -0 "${serial_pid}" 2>/dev/null; do
