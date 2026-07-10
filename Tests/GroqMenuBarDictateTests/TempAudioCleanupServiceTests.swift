@@ -54,6 +54,27 @@ final class TempAudioCleanupServiceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: recentURL.path))
     }
 
+    func testCleanupStaleFilesRemovesOldTriggeredWAVFiles() throws {
+        let fixture = try TempDirectoryFixture()
+        let now = Date()
+        let staleURL = try fixture.createFile(
+            named: "dictation-triggered.wav",
+            modifiedAt: now.addingTimeInterval(-(maxAge + 60))
+        )
+        let service = TempAudioCleanupService(
+            fileManager: .default,
+            temporaryDirectory: fixture.url,
+            nowProvider: { now }
+        )
+
+        let report = service.cleanupStaleFiles(olderThan: maxAge)
+
+        XCTAssertEqual(report.scannedCount, 1)
+        XCTAssertEqual(report.removedCount, 1)
+        XCTAssertEqual(report.failedCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleURL.path))
+    }
+
     func testCleanupStaleFilesRemovesOldMultipartBodyFiles() throws {
         let fixture = try TempDirectoryFixture()
         let now = Date()

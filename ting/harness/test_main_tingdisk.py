@@ -4,10 +4,18 @@ from pathlib import Path
 from tingmock import TingSim
 
 
-MAIN_PATH = Path(__file__).resolve().parents[1] / "main_1_0_8_extracted.py"
+MAIN_PATH = Path(__file__).resolve().parents[1] / "main_tingdisk.py"
 
 
-class StockFirmwareBehaviorTests(unittest.TestCase):
+class MainTingdiskBehaviorTests(unittest.TestCase):
+    def test_boot_emits_override_signature_without_a_user_profile(self):
+        sim = TingSim(MAIN_PATH)
+
+        self.assertEqual(
+            sim.spl.trigger_calls,
+            [(-1, 1, True), (-1, 1, False)],
+        )
+
     def test_sample_button_press_and_release_trigger_current_sample(self):
         sim = TingSim(MAIN_PATH)
 

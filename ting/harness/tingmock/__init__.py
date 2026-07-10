@@ -1,6 +1,6 @@
 """Desktop mocks for running ting MicroPython application code.
 
-The stock firmware script imports native MicroPython modules named ``ui``,
+The Ting main script imports native MicroPython modules named ``ui``,
 ``spl``, and ``fx``.  ``TingSim`` injects call-recording desktop substitutes
 for those bare module names while it execs the firmware source and while tests
 deliver callback messages.
@@ -137,7 +137,7 @@ class RP2Module(types.ModuleType):
 
 
 class TingSim:
-    """Exec a ting firmware Python source file under desktop mocks."""
+    """Exec a Ting main-script source file under desktop mocks."""
 
     def __init__(self, source_path=None, source_text=None) -> None:
         if source_path is None and source_text is None:

@@ -1,7 +1,9 @@
 # Ting Desktop Harness
 
-This directory contains a pure-Python desktop harness for the EP-2350 ting
-MicroPython app in `ting/main_1_0_8_extracted.py`.
+This directory contains a pure-Python desktop harness for the tracked EP-2350
+Ting `main_tingdisk.py` override and its deployable `user.py` profiles. The
+locally extracted stock firmware remains an optional ignored reference; the
+test suite does not depend on it.
 
 ## Usage
 
@@ -25,9 +27,15 @@ while injecting desktop modules under the bare names the firmware imports:
 - `fx`: records every called `fx.*` function as a no-op.
 
 The simulator also supplies minimal `vfs` and `rp2` modules while callbacks are
-running so the stock USB remount path can be tested. `TingSim.message(type, val)`
-builds firmware callback integers, and helpers such as `press`, `release`,
-`tick`, `set_switch`, and `inject_message` drive scripted sequences.
+running so the preserved USB remount path can be tested.
+`TingSim.message(type, val)` builds firmware callback integers, and helpers such
+as `press`, `release`, `tick`, `set_switch`, and `inject_message` drive scripted
+sequences.
+
+`test_main_tingdisk.py` verifies the tracked main override, including its boot
+signature and the preserved sample/preset behavior. `test_user_v13.py` covers
+the current start+stop profile, while `test_user_v12.py` protects the retained
+stop-only profile.
 
 ## Marker Tools
 
@@ -48,7 +56,7 @@ mono PCM16, and writes final clips as WAV files. `AudioRecorderService` is the
 older generic recorder path; it tries 16 kHz AAC first, then 22.05 kHz and
 44.1 kHz fallbacks.
 
-The default marker profile therefore targets the actual Ting capture format:
+The Mac-side detector profile targets the actual Ting capture format:
 
 - start marker: 6,000 Hz
 - stop marker: 7,000 Hz
@@ -57,5 +65,6 @@ The default marker profile therefore targets the actual Ting capture format:
 
 This pair sits above dominant speech energy, has 1 kHz spacing for simple
 classification, and leaves 1 kHz of margin below the 8 kHz Nyquist limit after
-the Mac-side resample. The harness also tests a 48 kHz lab profile at
-17,800/18,800 Hz for higher-rate capture experiments.
+the Mac-side resample. The tracked device WAVs use 48 kHz containers for Ting
+playback but contain the same 6/7 kHz tones. The harness also tests a separate
+48 kHz lab profile at 17,800/18,800 Hz for higher-rate capture experiments.

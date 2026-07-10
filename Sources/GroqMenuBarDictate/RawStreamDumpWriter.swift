@@ -6,7 +6,7 @@ final class RawStreamDumpWriter {
     private let fileHandle: FileHandle
     private var dataByteCount = 0
     private var isClosed = false
-    private(set) var lastError: Error?
+    private var lastError: Error?
 
     init(directory: URL, sampleRate: Int, maxFiles: Int = 10) throws {
         let fileManager = FileManager.default

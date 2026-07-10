@@ -67,7 +67,11 @@ final class SettingsWindowController: NSWindowController {
     private let optionKeyModePopup = NSPopUpButton()
     private let microphoneInputModePopup = NSPopUpButton()
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
-    private let audioActivityTriggerCheckbox = NSButton(checkboxWithTitle: "Auto-record from ting mic (Cable Creation input)", target: nil, action: nil)
+    private let audioActivityTriggerCheckbox = NSButton(
+        checkboxWithTitle: "Auto-record from ting mic (\(AppConfig.tingInputDeviceName) input)",
+        target: nil,
+        action: nil
+    )
     private let autoPasteCheckbox = NSButton(checkboxWithTitle: "Auto-paste after copy", target: nil, action: nil)
     private let endPruneCheckbox = NSButton(checkboxWithTitle: "Prune transcript ending phrases", target: nil, action: nil)
     private let diagnosticsCheckbox = NSButton(checkboxWithTitle: "Enable performance diagnostics", target: nil, action: nil)

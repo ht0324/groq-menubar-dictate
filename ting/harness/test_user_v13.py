@@ -1,31 +1,17 @@
 import unittest
 from pathlib import Path
 
+from user_profile_test_support import (
+    assert_marker_pulses,
+    click_press,
+    click_release,
+    load_user_profile,
+    send_adc2,
+    slot_calls,
+)
+
 
 USER_PATH = Path(__file__).resolve().parents[1] / "user.py"
-
-
-class MockFatFile:
-    def __init__(self, path, mode):
-        self.path = path
-        self.mode = mode
-        self.closed = False
-
-    def close(self):
-        self.closed = True
-
-
-class MockSpl:
-    def __init__(self):
-        self.load_wav_calls = []
-        self.trigger_calls = []
-
-    def load_wav(self, slot, f, mode):
-        self.load_wav_calls.append((slot, f.path, mode))
-        return True
-
-    def trigger(self, ch, slot, gate):
-        self.trigger_calls.append((ch, slot, gate))
 
 
 class UserV13LeverStartStopTests(unittest.TestCase):
@@ -117,54 +103,10 @@ class UserV13LeverStartStopTests(unittest.TestCase):
 
 
 def load_user():
-    spl = MockSpl()
-    logs = []
-    allowed_paths = {"/fat/marker_start.wav", "/fat/marker_stop.wav"}
-
-    def mock_open(path, mode="r"):
-        if path not in allowed_paths:
-            raise OSError(path)
-        return MockFatFile(path, mode)
-
-    def mock_print(*args):
-        logs.append(" ".join([str(arg) for arg in args]))
-
-    env = {"spl": spl, "open": mock_open, "print": mock_print}
-    source = USER_PATH.read_text()
-    exec(compile(source, str(USER_PATH), "exec"), env)
-    return env, spl, logs
-
-
-def adc_message(channel, value):
-    return ((0x10 | channel) << 16) | value
-
-
-def send_adc2(env, value):
-    env["user_cb"](adc_message(2, value))
-
-
-def click_press():
-    return (1 << 16) | 4
-
-
-def click_release():
-    return (2 << 16) | 4
-
-
-def slot_calls(spl, slot):
-    return [call for call in spl.trigger_calls if call[1] == slot]
-
-
-def marker_calls(spl):
-    return [call for call in spl.trigger_calls if call[1] in (2, 3)]
-
-
-def assert_marker_pulses(testcase, spl, slots):
-    expected = []
-    for slot in slots:
-        expected.append((-1, slot, True))
-        expected.append((-1, slot, False))
-    testcase.assertEqual(marker_calls(spl), expected)
+    return load_user_profile(
+        USER_PATH,
+        {"/fat/marker_start.wav", "/fat/marker_stop.wav"},
+    )
 
 
 if __name__ == "__main__":

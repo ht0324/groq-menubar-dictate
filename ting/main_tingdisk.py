@@ -1,4 +1,4 @@
-# TINGDISK main.py override experiment - delete this file to revert
+# Tracked TINGDISK main.py override; remove the device's main.py to revert.
 import os
 import json
 import ui

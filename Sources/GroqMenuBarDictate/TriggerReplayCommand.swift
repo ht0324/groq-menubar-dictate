@@ -36,7 +36,7 @@ enum TriggerReplayCommand {
             }
 
             let pcm16 = try readPCM16MonoWAV(at: URL(fileURLWithPath: audioPath))
-            try replay(pcm16: pcm16, options: options)
+            replay(pcm16: pcm16, options: options)
             return 0
         } catch {
             fputs("trigger_replay result=failed error=\"\(escape(error.localizedDescription))\"\n", stderr)
@@ -85,9 +85,6 @@ enum TriggerReplayCommand {
                 )
             case "data":
                 let availableBytes = data.count - payloadStart
-                guard availableBytes >= 0 else {
-                    throw ReplayError.invalidWAV("data chunk is truncated.")
-                }
                 let declaredEnd = payloadStart + declaredSize
                 let paddedDeclaredEnd = declaredEnd + (declaredSize % 2)
                 if declaredSize <= availableBytes,
@@ -132,7 +129,7 @@ enum TriggerReplayCommand {
         return pcm16
     }
 
-    private static func replay(pcm16: Data, options: Options) throws {
+    private static func replay(pcm16: Data, options: Options) {
         let chunkSampleCount = max(
             1,
             Int((Double(sampleRate) * Double(options.chunkMilliseconds) / 1_000.0).rounded())

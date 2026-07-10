@@ -816,7 +816,7 @@ final class AppCoordinator: NSObject {
             rawDumpEnabled: settings.audioTriggerRawDumpEnabled
         )
         if !audioCapture.isDeviceConnected {
-            setIdleStatusIfIdle("Auto-record armed — waiting for ting (\(AudioActivityCaptureService.targetDeviceName) input).")
+            setIdleStatusIfIdle("Auto-record armed — waiting for ting (\(AppConfig.tingInputDeviceName) input).")
         }
     }
 

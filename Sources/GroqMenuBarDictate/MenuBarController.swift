@@ -159,7 +159,7 @@ final class MenuBarController {
         menu.addItem(.separator())
 
         audioTriggerMenuItem.action = actions.toggleAudioTrigger
-        audioTriggerMenuItem.toolTip = "Start/stop dictation automatically from the ting mic (\(AudioActivityCaptureService.targetDeviceName) input)."
+        audioTriggerMenuItem.toolTip = "Start/stop dictation automatically from the ting mic (\(AppConfig.tingInputDeviceName) input)."
         menu.addItem(audioTriggerMenuItem)
 
         menu.addItem(menuItem(title: "Open Settings", action: actions.openSettings, keyEquivalent: ","))

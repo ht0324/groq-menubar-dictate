@@ -24,9 +24,9 @@ enum AudioRecorderError: LocalizedError {
         case .failedToSelectBuiltInMicrophone:
             return "Failed to switch to the built-in microphone."
         case .cableCreationInputUnavailable:
-            return "Cable Creation input not available."
+            return "\(AppConfig.tingInputDeviceName) input not available."
         case .failedToSelectCableCreationInput:
-            return "Failed to switch to the Cable Creation input."
+            return "Failed to switch to the \(AppConfig.tingInputDeviceName) input."
         }
     }
 }
@@ -168,7 +168,7 @@ private struct InputDeviceOverride {
     let shouldRestorePreviousInputDevice: Bool
 
     static func installBuiltInMicrophoneAsDefaultInput() throws -> InputDeviceOverride {
-        let previousInputDeviceID = try SystemAudioInputSelector.defaultInputDeviceID()
+        let previousInputDeviceID = try SystemAudioDeviceInspector.defaultInputDeviceID()
         guard let builtInMicrophoneID = try SystemAudioInputSelector.builtInMicrophoneInputDeviceID() else {
             throw AudioRecorderError.builtInMicrophoneUnavailable
         }
@@ -176,9 +176,9 @@ private struct InputDeviceOverride {
     }
 
     static func installCableCreationAsDefaultInput() throws -> InputDeviceOverride {
-        let previousInputDeviceID = try SystemAudioInputSelector.defaultInputDeviceID()
+        let previousInputDeviceID = try SystemAudioDeviceInspector.defaultInputDeviceID()
         guard let cableCreation = SystemAudioDeviceInspector.firstInputDevice(
-            matchingName: AudioActivityCaptureService.targetDeviceName
+            matchingName: AppConfig.tingInputDeviceName
         ) else {
             throw AudioRecorderError.cableCreationInputUnavailable
         }
@@ -200,7 +200,7 @@ private struct InputDeviceOverride {
             )
         }
 
-        try SystemAudioInputSelector.setDefaultInputDeviceID(inputDeviceID)
+        try SystemAudioDeviceInspector.setDefaultInputDeviceID(inputDeviceID)
         return InputDeviceOverride(
             previousInputDeviceID: previousInputDeviceID,
             changedDefaultInputDevice: true,
@@ -212,19 +212,11 @@ private struct InputDeviceOverride {
         guard changedDefaultInputDevice, shouldRestorePreviousInputDevice else {
             return
         }
-        try SystemAudioInputSelector.setDefaultInputDeviceID(previousInputDeviceID)
+        try SystemAudioDeviceInspector.setDefaultInputDeviceID(previousInputDeviceID)
     }
 }
 
 private enum SystemAudioInputSelector {
-    static func defaultInputDeviceID() throws -> AudioDeviceID {
-        try SystemAudioDeviceInspector.defaultInputDeviceID()
-    }
-
-    static func setDefaultInputDeviceID(_ deviceID: AudioDeviceID) throws {
-        try SystemAudioDeviceInspector.setDefaultInputDeviceID(deviceID)
-    }
-
     static func shouldRestoreInputDeviceAfterRecording(_ deviceID: AudioDeviceID) -> Bool {
         guard let deviceInfo = try? SystemAudioDeviceInspector.deviceInfo(for: deviceID) else {
             return true
@@ -253,7 +245,7 @@ private enum SystemAudioInputSelector {
     }
 
     private static func deviceID(matchingUID targetUID: String) throws -> AudioDeviceID? {
-        for deviceID in try allAudioDeviceIDs() {
+        for deviceID in try SystemAudioDeviceInspector.allAudioDeviceIDs() {
             guard let uid = try SystemAudioDeviceInspector.deviceInfo(for: deviceID).uid else {
                 continue
             }
@@ -263,46 +255,4 @@ private enum SystemAudioInputSelector {
         }
         return nil
     }
-
-    private static func allAudioDeviceIDs() throws -> [AudioDeviceID] {
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var dataSize: UInt32 = 0
-        let sizeStatus = AudioObjectGetPropertyDataSize(
-            AudioObjectID(kAudioObjectSystemObject),
-            &propertyAddress,
-            0,
-            nil,
-            &dataSize
-        )
-        guard sizeStatus == noErr else {
-            throw CoreAudioError.failed(operation: "read audio device list size", status: sizeStatus)
-        }
-
-        let count = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
-        guard count > 0 else {
-            return []
-        }
-        var deviceIDs = Array(repeating: AudioDeviceID(bitPattern: 0), count: count)
-        var mutableDataSize = dataSize
-        let readStatus = deviceIDs.withUnsafeMutableBufferPointer { buffer in
-            AudioObjectGetPropertyData(
-                AudioObjectID(kAudioObjectSystemObject),
-                &propertyAddress,
-                0,
-                nil,
-                &mutableDataSize,
-                buffer.baseAddress!
-            )
-        }
-        guard readStatus == noErr else {
-            throw CoreAudioError.failed(operation: "read audio device list", status: readStatus)
-        }
-        return deviceIDs
-    }
-
 }

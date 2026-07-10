@@ -6,6 +6,7 @@ enum AppConfig {
     static let defaultModel = "whisper-large-v3-turbo"
     static let defaultGroqEndpoint = URL(string: "https://api.groq.com/openai/v1/audio/transcriptions")!
     static let appSupportFolderName = "groq-menubar-dictate"
+    static let tingInputDeviceName = "Cable Creation"
 }
 
 enum MicrophoneInputMode: String, CaseIterable {
@@ -20,7 +21,7 @@ enum MicrophoneInputMode: String, CaseIterable {
         case .macBookInternal:
             return "Always use this Mac's built-in microphone"
         case .cableCreation:
-            return "Cable Creation USB input"
+            return "\(AppConfig.tingInputDeviceName) USB input"
         }
     }
 }

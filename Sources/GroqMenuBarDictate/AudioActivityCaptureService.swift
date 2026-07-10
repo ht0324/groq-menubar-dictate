@@ -16,7 +16,6 @@ import OSLog
 /// - When activity stops, the trailing silence hold is trimmed and the clip
 ///   is finalized in memory — "recording" has zero start/stop device cost.
 final class AudioActivityCaptureService: @unchecked Sendable {
-    static let targetDeviceName = "Cable Creation"
     private static let outputSampleRate = 16_000
     private static let bytesPerSample = 2
     private static let engineRestartDelaySeconds: TimeInterval = 0.5
@@ -33,7 +32,6 @@ final class AudioActivityCaptureService: @unchecked Sendable {
     private var rawDumpEnabled = false
     private var configuration = AudioActivityTriggerConfiguration()
     private var engine: AVAudioEngine?
-    private var engineDeviceID: AudioDeviceID?
     private var deviceListListener: AudioObjectPropertyListenerBlock?
     private var configurationChangeObserver: NSObjectProtocol?
     private var pendingEngineRestart = false
@@ -61,7 +59,7 @@ final class AudioActivityCaptureService: @unchecked Sendable {
     var onMonitorError: ((String) -> Void)?
 
     var isDeviceConnected: Bool {
-        SystemAudioDeviceInspector.firstInputDevice(matchingName: Self.targetDeviceName) != nil
+        SystemAudioDeviceInspector.firstInputDevice(matchingName: AppConfig.tingInputDeviceName) != nil
     }
 
     /// Main queue only.
@@ -176,7 +174,7 @@ final class AudioActivityCaptureService: @unchecked Sendable {
         guard isEnabled else {
             return
         }
-        let device = SystemAudioDeviceInspector.firstInputDevice(matchingName: Self.targetDeviceName)
+        let device = SystemAudioDeviceInspector.firstInputDevice(matchingName: AppConfig.tingInputDeviceName)
 
         if let device {
             guard engine == nil else {
@@ -272,7 +270,6 @@ final class AudioActivityCaptureService: @unchecked Sendable {
         }
 
         self.engine = engine
-        engineDeviceID = deviceID
         configurationChangeObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
             object: engine,
@@ -298,7 +295,6 @@ final class AudioActivityCaptureService: @unchecked Sendable {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         self.engine = nil
-        engineDeviceID = nil
         if shouldCancel {
             cancelActiveCapture()
         }

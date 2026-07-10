@@ -271,6 +271,34 @@ final class MarkerToneDetectorTests: XCTestCase {
         )
     }
 
+    func testMarkerTrimKeepsLateStartMarkerToProtectSpokenContent() {
+        let configuration = AudioActivityTriggerConfiguration()
+        let clipStart = 1_000
+        let headWindowSamples = Int(
+            configuration.markerStartHeadWindowSeconds
+                * Double(configuration.markerToneConfiguration.sampleRate)
+        )
+        let lateMarkerStart = clipStart + headWindowSamples + 1
+        let startMarker = MarkerToneEvent(
+            kind: .start,
+            sampleRange: lateMarkerStart..<(lateMarkerStart + 480),
+            frequency: 6_000,
+            purity: 1
+        )
+        let samples = rampPCMData(sampleCount: headWindowSamples + 1_000)
+
+        let trimmed = AudioActivityCaptureService.trimMarkerTones(
+            pcm16: samples,
+            clipStartSampleIndex: clipStart,
+            startMarker: startMarker,
+            stopMarker: nil,
+            configuration: configuration,
+            trimTailSeconds: 0
+        )
+
+        XCTAssertEqual(trimmed, samples)
+    }
+
     private func detectMarkers(in data: Data, chunkSize: Int) -> [MarkerToneEvent] {
         var detector = MarkerToneDetector()
         var events: [MarkerToneEvent] = []
