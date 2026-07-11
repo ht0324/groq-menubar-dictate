@@ -48,6 +48,12 @@ final class AudioRecorderService: NSObject {
         restoreInputOverrideIfNeeded()
     }
 
+    /// Warms AVFoundation and CoreAudio device discovery without opening an
+    /// audio stream or requesting microphone access.
+    static func prewarmBuiltInMicrophone() {
+        _ = try? SystemAudioInputSelector.builtInMicrophoneInputDeviceID()
+    }
+
     func startRecording(mode: MicrophoneInputMode = .automatic) throws {
         guard recorder == nil else {
             throw AudioRecorderError.alreadyRecording

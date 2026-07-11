@@ -109,6 +109,8 @@ final class AppCoordinator: NSObject {
     }
 
     func start() {
+        prewarmBuiltInMicrophoneIfNeeded()
+
         let cleanupReport = tempAudioCleanup.cleanupStaleFiles()
         if cleanupReport.removedCount > 0 || cleanupReport.failedCount > 0 {
             logger.info(
@@ -567,6 +569,15 @@ final class AppCoordinator: NSObject {
         }
     }
 
+    private func prewarmBuiltInMicrophoneIfNeeded() {
+        guard settings.microphoneInputMode == .macBookInternal else {
+            return
+        }
+        Task.detached(priority: .userInitiated) {
+            AudioRecorderService.prewarmBuiltInMicrophone()
+        }
+    }
+
     private func setIdleStatusIfIdle(_ message: String) {
         guard state == .idle || state == .error else {
             return
@@ -696,6 +707,8 @@ final class AppCoordinator: NSObject {
     }
 
     private func applySettings(_ snapshot: SettingsSnapshot) {
+        let shouldPrewarmBuiltInMicrophone = settings.microphoneInputMode != .macBookInternal
+            && snapshot.microphoneInputMode == .macBookInternal
         settings.autoPasteEnabled = snapshot.autoPasteEnabled
         settings.endPruneEnabled = snapshot.endPruneEnabled
         settings.performanceDiagnosticsEnabled = snapshot.performanceDiagnosticsEnabled
@@ -707,6 +720,9 @@ final class AppCoordinator: NSObject {
         settings.model = snapshot.model
         settings.languageHint = snapshot.languageHint
         settings.typingWordsPerMinute = snapshot.typingWordsPerMinute
+        if shouldPrewarmBuiltInMicrophone {
+            prewarmBuiltInMicrophoneIfNeeded()
+        }
         refreshStatsMenu()
         Task { [weak self] in
             await self?.updateAudioActivityTriggerMonitor()
