@@ -30,6 +30,10 @@ struct AudioActivityTriggerConfiguration {
     // marker firmware is absent (no start marker seen), so stock hardware
     // keeps the snappy 0.22s behavior.
     var markerFallbackStopHoldSeconds: TimeInterval = 12.0
+    // Brief single-chunk USB tether noise blips near -24 dBFS must not
+    // restart the 12s marker fallback hold. Real speech stays loud for
+    // this long and still resets it.
+    var markerFallbackLoudResetSeconds: TimeInterval = 0.25
     var minimumActiveSeconds: TimeInterval = 0.3
     var preRollSeconds: TimeInterval = 0.6
     var maxUtteranceSeconds: TimeInterval = 300
@@ -119,14 +123,8 @@ struct AudioActivityTriggerDetector {
                 guard isActive else {
                     continue
                 }
-                // A stop marker heard almost immediately after start is not a
-                // real release: it is switch bounce from the squeeze or a
-                // stale marker still in the pre-roll. Let the clip live; the
-                // genuine release will send another stop marker.
-                let activeDuration = timestamp - (activeSince ?? timestamp)
-                guard activeDuration >= configuration.minimumActiveSeconds else {
-                    continue
-                }
+                // Firmware emits one stop tone per release, so even an immediate
+                // 7 kHz stop after the distinct 6 kHz start tone is real.
                 return stopCapture(stopMarker: markerEvent)
             }
         }
@@ -159,10 +157,22 @@ struct AudioActivityTriggerDetector {
         timestamp: TimeInterval
     ) -> AudioActivityTriggerEvent? {
         guard levelDBFS <= configuration.stopThresholdDBFS else {
-            quietSince = nil
+            guard activeStartMarker != nil else {
+                quietSince = nil
+                return nil
+            }
+
+            if loudSince == nil {
+                loudSince = timestamp
+            }
+            if let loudStart = loudSince,
+               timestamp - loudStart >= configuration.markerFallbackLoudResetSeconds {
+                quietSince = nil
+            }
             return nil
         }
 
+        loudSince = nil
         if quietSince == nil {
             quietSince = timestamp
         }

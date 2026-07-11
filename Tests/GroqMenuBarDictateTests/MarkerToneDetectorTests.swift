@@ -65,7 +65,7 @@ final class MarkerToneDetectorTests: XCTestCase {
             stopThresholdDBFS: -90,
             startHoldSeconds: 0.5,
             stopHoldSeconds: 5.0,
-            minimumActiveSeconds: 0,
+            minimumActiveSeconds: 0.3,
             preRollSeconds: 0.6,
             maxUtteranceSeconds: 300,
             markerToneConfiguration: markerConfiguration
@@ -99,6 +99,7 @@ final class MarkerToneDetectorTests: XCTestCase {
         let stopStartSample = (startMarker.count + speech.count) / 2
         let stopMarker = markerData(frequency: 7_000, amplitude: 0.30)
         let stopLevel = AudioActivityCaptureService.levelDBFS(pcm16: stopMarker)!
+        XCTAssertLessThan(0.26, configuration.minimumActiveSeconds)
         XCTAssertGreaterThan(stopLevel, configuration.stopThresholdDBFS)
         XCTAssertEqual(
             detector.process(
@@ -151,71 +152,6 @@ final class MarkerToneDetectorTests: XCTestCase {
         // The extended fallback still rescues a genuinely missed stop marker.
         XCTAssertEqual(detector.process(levelDBFS: -90, timestamp: 2.40), .stopped)
         XCTAssertNil(detector.lastStopMarker)
-    }
-
-    func testEarlyStopMarkerFromSwitchBounceIsIgnored() {
-        var markerConfiguration = MarkerToneDetector.Configuration()
-        markerConfiguration.minimumRMS = 0.02
-        let configuration = AudioActivityTriggerConfiguration(
-            startThresholdDBFS: -20,
-            stopThresholdDBFS: -90,
-            startHoldSeconds: 5.0,
-            stopHoldSeconds: 0.22,
-            minimumActiveSeconds: 0.3,
-            preRollSeconds: 0.6,
-            maxUtteranceSeconds: 300,
-            markerToneConfiguration: markerConfiguration
-        )
-        var detector = AudioActivityTriggerDetector(configuration: configuration)
-
-        let startMarker = markerData(frequency: 6_000, amplitude: 0.30)
-        let startLevel = AudioActivityCaptureService.levelDBFS(pcm16: startMarker)!
-        XCTAssertEqual(
-            detector.process(
-                pcm16: startMarker,
-                levelDBFS: startLevel,
-                timestamp: 0.03,
-                startingAtSampleIndex: 0
-            ),
-            .started
-        )
-
-        // Bounce: a stop marker within minimumActiveSeconds must not end the clip.
-        let bounceStop = markerData(frequency: 7_000, amplitude: 0.30)
-        let bounceLevel = AudioActivityCaptureService.levelDBFS(pcm16: bounceStop)!
-        XCTAssertNil(
-            detector.process(
-                pcm16: bounceStop,
-                levelDBFS: bounceLevel,
-                timestamp: 0.10,
-                startingAtSampleIndex: startMarker.count / 2
-            )
-        )
-        XCTAssertTrue(detector.isActive)
-
-        // Speech continues after the bounce (also lets the tone detector re-arm).
-        let speech = pcmData(from: speechLikeAudio(durationSeconds: 0.4, seed: 404))
-        let speechLevel = AudioActivityCaptureService.levelDBFS(pcm16: speech)!
-        XCTAssertNil(
-            detector.process(
-                pcm16: speech,
-                levelDBFS: speechLevel,
-                timestamp: 0.50,
-                startingAtSampleIndex: (startMarker.count + bounceStop.count) / 2
-            )
-        )
-
-        // The genuine release after real speech still stops immediately.
-        let realStop = markerData(frequency: 7_000, amplitude: 0.30)
-        XCTAssertEqual(
-            detector.process(
-                pcm16: realStop,
-                levelDBFS: bounceLevel,
-                timestamp: 0.90,
-                startingAtSampleIndex: (startMarker.count + bounceStop.count + speech.count) / 2
-            ),
-            .stopped
-        )
     }
 
     func testLevelStartedClipKeepsSnappyStopHoldWithoutMarker() {
