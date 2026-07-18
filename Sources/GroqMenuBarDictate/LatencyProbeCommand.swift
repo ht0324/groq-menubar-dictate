@@ -301,7 +301,7 @@ enum LatencyProbeCommand {
     private static var usage: String {
         """
         Usage:
-          swift run groq-menubar-dictate --latency-probe <audio-file> [--api-key <key>] [--model <model>] [--language <hint>] [--timeout <seconds>] [--keep-clipboard]
+          swift run Bolt --latency-probe <audio-file> [--api-key <key>] [--model <model>] [--language <hint>] [--timeout <seconds>] [--keep-clipboard]
 
         API key resolution order:
           --api-key, GROQ_API_KEY, app settings.

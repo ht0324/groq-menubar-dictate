@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME="Groq MenuBar Dictate.app"
+APP_NAME="Bolt.app"
 DIST_DIR="${GROQ_DICTATE_DIST_DIR:-${ROOT_DIR}/dist}"
 METADATA_ENV_PATH="${DIST_DIR}/release-metadata.env"
 BUILD_BUNDLE_TMP_DIR=""

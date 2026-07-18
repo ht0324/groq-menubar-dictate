@@ -152,7 +152,7 @@ final class SettingsWindowController: NSWindowController {
         stack.spacing = 18
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let title = NSTextField(labelWithString: "Groq Dictation Settings")
+        let title = NSTextField(labelWithString: "Bolt⚡ Settings")
         title.alignment = .left
         title.font = NSFont.boldSystemFont(ofSize: 17)
 

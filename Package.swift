@@ -3,13 +3,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "groq-menubar-dictate",
+    name: "Bolt",
     platforms: [
         .macOS(.v13),
     ],
     products: [
         .executable(
-            name: "groq-menubar-dictate",
+            name: "Bolt",
             targets: ["GroqMenuBarDictate"]
         ),
     ],

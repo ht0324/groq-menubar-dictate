@@ -120,7 +120,7 @@ final class MenuBarController {
 
     func showSetupGuidance(missingAPIKey: Bool, missingListenPermission: Bool) -> Bool {
         let steps = [
-            "Groq MenuBar Dictate runs from the menu bar.",
+            "Bolt runs from the menu bar.",
             missingAPIKey ? "Paste your Groq API key in Settings." : nil,
             missingListenPermission ? "Click Test Permissions in Settings to grant Input Monitoring for the Option-key hotkey." : nil,
             "Grant microphone access the first time you record."

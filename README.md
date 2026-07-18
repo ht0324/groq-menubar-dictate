@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="assets/groq-menubar-dictate-preview.png" alt="Groq MenuBar Dictate menu bar screenshot" width="180" height="180">
+  <img src="assets/bolt-preview.png" alt="Bolt menu bar screenshot" width="180" height="180">
 </p>
 
-<h1 align="center">Groq MenuBar Dictate</h1>
+<h1 align="center">Bolt</h1>
 
 <p align="center">
   A tiny macOS menu bar app for fast speech-to-text with Groq.
 </p>
 
-Groq MenuBar Dictate is built for the moment when typing would slow you down.
+Bolt is built for the moment when typing would slow you down.
 Tap Option, say what you want to write, tap Option again, and the transcript is copied or pasted into the app you were already using.
 
 It is intentionally small: no heavy window, no account system, no background dashboard.
@@ -61,7 +61,7 @@ For everyday use, install the app bundle into `/Applications`:
 ```bash
 ./scripts/create_local_signing_identity.sh
 ./scripts/install_to_applications.sh
-open -a "/Applications/Groq MenuBar Dictate.app"
+open -a "/Applications/Bolt.app"
 ```
 
 The local signing identity is self-signed and only for this Mac, but it keeps the app identity stable so macOS is less likely to ask for Accessibility/Input Monitoring again after every reinstall. If you have an Apple code-signing certificate, the installer will prefer that stable identity instead:
@@ -96,6 +96,10 @@ To build a shareable zip without a paid Apple Developer account, use the local s
 ```
 
 The zip lands in `dist/` with the version, build number, commit, and dirty state in the filename.
+
+### Compatibility Identifiers
+
+Bolt intentionally retains the legacy bundle identifier `com.huntae.groq-menubar-dictate`, local signing identity `Groq MenuBar Dictate Local Code Signing`, `GROQ_DICTATE_*` build variables, and `groq-menubar-dictate` Application Support folder. These internal identifiers preserve existing macOS permissions, settings, API keys, logs, and personal cleanup files. Do not rename them without an explicit migration plan.
 
 ## Settings And Text Cleanup
 
@@ -149,7 +153,7 @@ Run these commands from the repository root:
 swift build
 swift test
 swift test --filter OptionTapValidatorTests
-swift run
+swift run Bolt
 ```
 
 The code is organized around small services:

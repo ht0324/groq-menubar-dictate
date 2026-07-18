@@ -22,7 +22,7 @@ final class ExecutablePathResolverTests: XCTestCase {
     func testResolveFindsCommandOnPath() throws {
         let binURL = tempDirectoryURL.appendingPathComponent("bin", isDirectory: true)
         try fileManager.createDirectory(at: binURL, withIntermediateDirectories: true)
-        let executableURL = binURL.appendingPathComponent("groq-menubar-dictate", isDirectory: false)
+        let executableURL = binURL.appendingPathComponent("Bolt", isDirectory: false)
         try "#!/bin/sh\necho hi\n".write(to: executableURL, atomically: true, encoding: .utf8)
         try fileManager.setAttributes(
             [.posixPermissions: 0o755],
@@ -30,7 +30,7 @@ final class ExecutablePathResolverTests: XCTestCase {
         )
 
         let resolved = ExecutablePathResolver.resolve(
-            arguments: ["groq-menubar-dictate"],
+            arguments: ["Bolt"],
             environment: ["PATH": binURL.path],
             currentDirectoryPath: tempDirectoryURL.path
         )
@@ -40,7 +40,7 @@ final class ExecutablePathResolverTests: XCTestCase {
 
     func testResolveDoesNotFallBackToCurrentDirectoryForCommandNameOnly() {
         let resolved = ExecutablePathResolver.resolve(
-            arguments: ["groq-menubar-dictate"],
+            arguments: ["Bolt"],
             environment: ["PATH": "/usr/bin:/bin"],
             currentDirectoryPath: tempDirectoryURL.path
         )

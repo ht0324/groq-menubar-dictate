@@ -391,7 +391,7 @@ enum TriggerReplayCommand {
     private static var usage: String {
         """
         Usage:
-          swift run groq-menubar-dictate --trigger-replay <wav-file> [--chunk-ms N] [--use-settings] [--verbose]
+          swift run Bolt --trigger-replay <wav-file> [--chunk-ms N] [--use-settings] [--verbose]
 
         Replays a 16 kHz mono PCM16 WAV dump through the ting trigger detector and prints marker and capture decisions.
         """

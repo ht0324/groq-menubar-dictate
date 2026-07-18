@@ -7,8 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SESSION_ROOT="${SCRIPT_DIR}/sessions"
 APP_DOMAIN="com.huntae.groq-menubar-dictate"
-APP_BUNDLE="/Applications/Groq MenuBar Dictate.app"
-APP_EXECUTABLE="${APP_BUNDLE}/Contents/MacOS/groq-menubar-dictate"
+APP_BUNDLE="/Applications/Bolt.app"
+APP_EXECUTABLE="${APP_BUNDLE}/Contents/MacOS/Bolt"
 APP_INFO_PLIST="${APP_BUNDLE}/Contents/Info.plist"
 TRIGGER_KEY="settings.audioActivityTriggerEnabled"
 RAW_DUMP_KEY="settings.audioTriggerRawDumpEnabled"
@@ -61,7 +61,7 @@ require_enabled_setting() {
     value="$(setting_value "${key}")"
     if [[ "${value}" != "1" ]]; then
         echo "${label} is not enabled (${key}=${value:-unset})." >&2
-        echo "Enable it in Groq MenuBar Dictate settings, restart the app, and retry." >&2
+        echo "Enable it in Bolt settings, restart the app, and retry." >&2
         exit 1
     fi
     printf '%s' "${value}"
@@ -565,7 +565,7 @@ def file_details(path):
 
 
 def installed_app_details():
-    info_path = Path("/Applications/Groq MenuBar Dictate.app/Contents/Info.plist")
+    info_path = Path("/Applications/Bolt.app/Contents/Info.plist")
     details = {"path": str(info_path.parent.parent), "present": info_path.is_file()}
     if not info_path.is_file():
         return details

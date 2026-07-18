@@ -12,7 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct GroqMenuBarDictateApp {
+struct BoltApp {
     @MainActor
     static func main() async {
         if TriggerReplayCommand.shouldRun(arguments: CommandLine.arguments) {

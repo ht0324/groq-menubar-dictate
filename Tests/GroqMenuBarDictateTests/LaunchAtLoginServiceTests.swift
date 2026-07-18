@@ -21,7 +21,7 @@ final class LaunchAtLoginServiceTests: XCTestCase {
 
     @MainActor
     func testSetEnabledSkipsLaunchctlWhenExistingPlistAlreadyMatches() throws {
-        let executablePath = "/Applications/Groq MenuBar Dictate.app/Contents/MacOS/groq-menubar-dictate"
+        let executablePath = "/Applications/Bolt.app/Contents/MacOS/Bolt"
         try writeLaunchAgentPlist(executablePath: executablePath)
         var launchctlCalls: [[String]] = []
         let service = LaunchAtLoginService(plistURL: plistURL) { args, _ in
@@ -35,7 +35,7 @@ final class LaunchAtLoginServiceTests: XCTestCase {
 
     @MainActor
     func testSetEnabledRewritesLaunchctlWhenExecutablePathChanges() throws {
-        try writeLaunchAgentPlist(executablePath: "/Applications/Old.app/Contents/MacOS/groq-menubar-dictate")
+        try writeLaunchAgentPlist(executablePath: "/Applications/Old.app/Contents/MacOS/Bolt")
         var launchctlCalls: [[String]] = []
         let service = LaunchAtLoginService(plistURL: plistURL) { args, _ in
             launchctlCalls.append(args)
@@ -43,7 +43,7 @@ final class LaunchAtLoginServiceTests: XCTestCase {
 
         try service.setEnabled(
             true,
-            executablePath: "/Applications/Groq MenuBar Dictate.app/Contents/MacOS/groq-menubar-dictate"
+            executablePath: "/Applications/Bolt.app/Contents/MacOS/Bolt"
         )
 
         XCTAssertEqual(launchctlCalls.map(\.first), ["bootout", "bootstrap"])
@@ -51,7 +51,7 @@ final class LaunchAtLoginServiceTests: XCTestCase {
 
     @MainActor
     func testSetEnabledRewritesLaunchctlWhenLogPathsAreLegacyTmpPaths() throws {
-        let executablePath = "/Applications/Groq MenuBar Dictate.app/Contents/MacOS/groq-menubar-dictate"
+        let executablePath = "/Applications/Bolt.app/Contents/MacOS/Bolt"
         try writeLaunchAgentPlist(
             executablePath: executablePath,
             standardOutPath: "/tmp/groq-menubar-dictate.launchd.out.log",

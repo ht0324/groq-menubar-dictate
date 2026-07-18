@@ -2,15 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME="Groq MenuBar Dictate.app"
+APP_NAME="Bolt.app"
 BUNDLE_ID="com.huntae.groq-menubar-dictate"
-EXECUTABLE_NAME="groq-menubar-dictate"
+EXECUTABLE_NAME="Bolt"
 DIST_DIR="${GROQ_DICTATE_DIST_DIR:-${ROOT_DIR}/dist}"
 BUNDLE_PATH="${GROQ_DICTATE_BUNDLE_PATH:-${DIST_DIR}/${APP_NAME}}"
 SIGN_IDENTITY="${GROQ_DICTATE_SIGN_IDENTITY:-}"
 SIGN_IDENTITY_HINT="${GROQ_DICTATE_SIGN_IDENTITY_HINT:-}"
 LOCAL_SIGN_IDENTITY="${GROQ_DICTATE_LOCAL_SIGN_IDENTITY:-Groq MenuBar Dictate Local Code Signing}"
 ALLOW_ADHOC_SIGNING="${GROQ_DICTATE_ALLOW_ADHOC:-0}"
+APP_ICON_PATH="${ROOT_DIR}/assets/Bolt.icns"
 
 # shellcheck source=scripts/release_metadata.sh
 source "${ROOT_DIR}/scripts/release_metadata.sh"
@@ -108,6 +109,11 @@ if [[ ! -x "${BINARY_PATH}" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${APP_ICON_PATH}" ]]; then
+  echo "App icon not found: ${APP_ICON_PATH}" >&2
+  exit 1
+fi
+
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
@@ -121,6 +127,7 @@ mkdir -p "${DIST_DIR}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 cp "${BINARY_PATH}" "${MACOS_DIR}/${EXECUTABLE_NAME}"
 chmod +x "${MACOS_DIR}/${EXECUTABLE_NAME}"
+cp "${APP_ICON_PATH}" "${RESOURCES_DIR}/Bolt.icns"
 
 cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -133,10 +140,12 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
   <string>${EXECUTABLE_NAME}</string>
   <key>CFBundleIdentifier</key>
   <string>${BUNDLE_ID}</string>
+  <key>CFBundleIconFile</key>
+  <string>Bolt.icns</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>Groq MenuBar Dictate</string>
+  <string>Bolt</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -160,13 +169,13 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
   <key>LSUIElement</key>
   <true/>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Groq MenuBar Dictate records short audio clips when you tap Option to transcribe speech.</string>
+  <string>Bolt records short audio clips when you tap Option to transcribe speech.</string>
 </dict>
 </plist>
 PLIST
 
 cat > "${RESOURCES_DIR}/release-metadata.txt" <<EOF
-Groq MenuBar Dictate
+Bolt
 Version: ${GROQ_DICTATE_VERSION_DISPLAY}
 Short version: ${GROQ_DICTATE_SHORT_VERSION}
 Build: ${GROQ_DICTATE_BUNDLE_VERSION}
