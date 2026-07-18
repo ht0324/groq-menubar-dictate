@@ -14,6 +14,7 @@ final class CustomWordsStoreTests: XCTestCase {
 
         try store.ensureSeedFileExists()
 
+        XCTAssertTrue(fileManager.fileExists(atPath: wordsURL.path))
         XCTAssertEqual(store.loadWords(limit: 10), [])
     }
 }
