@@ -36,13 +36,9 @@ struct RecordedClip {
     let recorderReportedDurationSeconds: TimeInterval
 }
 
-final class AudioRecorderService: NSObject {
+final class AudioRecorderService {
     private var recorder: AVAudioRecorder?
     private var inputDeviceOverride: InputDeviceOverride?
-
-    var isRecording: Bool {
-        recorder?.isRecording ?? false
-    }
 
     deinit {
         restoreInputOverrideIfNeeded()
@@ -54,45 +50,38 @@ final class AudioRecorderService: NSObject {
         _ = try? SystemAudioInputSelector.builtInMicrophoneInputDeviceID()
     }
 
-    func startRecording(mode: MicrophoneInputMode = .automatic) throws {
+    func startRecording(mode: MicrophoneInputMode = .automatic) throws -> RecordingStartTiming {
         guard recorder == nil else {
             throw AudioRecorderError.alreadyRecording
         }
 
-        let inputOverride: InputDeviceOverride
-        switch mode {
-        case .automatic:
-            inputOverride = .none
-        case .macBookInternal:
-            do {
-                inputOverride = try InputDeviceOverride.installBuiltInMicrophoneAsDefaultInput()
-            } catch AudioRecorderError.builtInMicrophoneUnavailable {
-                throw AudioRecorderError.builtInMicrophoneUnavailable
-            } catch {
-                throw AudioRecorderError.failedToSelectBuiltInMicrophone
-            }
-        case .cableCreation:
-            do {
-                inputOverride = try InputDeviceOverride.installCableCreationAsDefaultInput()
-            } catch AudioRecorderError.cableCreationInputUnavailable {
-                throw AudioRecorderError.cableCreationInputUnavailable
-            } catch {
-                throw AudioRecorderError.failedToSelectCableCreationInput
-            }
+        var timing = RecordingStartTiming()
+        let inputOverride = try RecordingStartTiming.measure(&timing.deviceSelectionMilliseconds) {
+            try selectInput(mode: mode)
         }
 
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("dictation-\(UUID().uuidString)")
             .appendingPathExtension("m4a")
 
-        for profile in recordingProfiles {
+        for sampleRate in [16_000.0, 22_050.0, 44_100.0] {
+            timing.profileAttempts += 1
             do {
-                let recorder = try AVAudioRecorder(url: outputURL, settings: profile)
-                recorder.prepareToRecord()
-                if recorder.record() {
+                let recorder = try RecordingStartTiming.measure(&timing.recorderCreationMilliseconds) {
+                    try AVAudioRecorder(url: outputURL, settings: makeSettings(sampleRate: sampleRate))
+                }
+                let prepared = RecordingStartTiming.measure(&timing.preparationMilliseconds) {
+                    recorder.prepareToRecord()
+                }
+                guard prepared else { continue }
+                let started = RecordingStartTiming.measure(&timing.recordMilliseconds) {
+                    recorder.record()
+                }
+                if started {
                     self.recorder = recorder
                     inputDeviceOverride = inputOverride
-                    return
+                    timing.sampleRate = recorder.format.sampleRate
+                    return timing
                 }
             } catch {
                 continue
@@ -100,7 +89,31 @@ final class AudioRecorderService: NSObject {
         }
 
         try? inputOverride.restore()
+        try? FileManager.default.removeItem(at: outputURL)
         throw AudioRecorderError.failedToStart
+    }
+
+    private func selectInput(mode: MicrophoneInputMode) throws -> InputDeviceOverride {
+        switch mode {
+        case .automatic:
+            return .none
+        case .macBookInternal:
+            do {
+                return try InputDeviceOverride.installBuiltInMicrophoneAsDefaultInput()
+            } catch AudioRecorderError.builtInMicrophoneUnavailable {
+                throw AudioRecorderError.builtInMicrophoneUnavailable
+            } catch {
+                throw AudioRecorderError.failedToSelectBuiltInMicrophone
+            }
+        case .cableCreation:
+            do {
+                return try InputDeviceOverride.installCableCreationAsDefaultInput()
+            } catch AudioRecorderError.cableCreationInputUnavailable {
+                throw AudioRecorderError.cableCreationInputUnavailable
+            } catch {
+                throw AudioRecorderError.failedToSelectCableCreationInput
+            }
+        }
     }
 
     func stopRecording() throws -> RecordedClip {
@@ -126,14 +139,6 @@ final class AudioRecorderService: NSObject {
         self.inputDeviceOverride = nil
     }
 
-    private var recordingProfiles: [[String: Any]] {
-        [
-            makeSettings(sampleRate: 16_000),
-            makeSettings(sampleRate: 22_050),
-            makeSettings(sampleRate: 44_100),
-        ]
-    }
-
     private func makeSettings(sampleRate: Double) -> [String: Any] {
         [
             AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
@@ -142,10 +147,6 @@ final class AudioRecorderService: NSObject {
             AVEncoderBitRateKey: 32_000,
             AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
         ]
-    }
-
-    func recordedFileDuration(for fileURL: URL) -> TimeInterval? {
-        Self.fileDuration(at: fileURL)
     }
 
     /// Reads the encoded clip's duration without touching recorder state, so it
@@ -163,15 +164,9 @@ final class AudioRecorderService: NSObject {
 }
 
 private struct InputDeviceOverride {
-    static let none = InputDeviceOverride(
-        previousInputDeviceID: AudioDeviceID(bitPattern: 0),
-        changedDefaultInputDevice: false,
-        shouldRestorePreviousInputDevice: true
-    )
+    static let none = InputDeviceOverride(previousInputDeviceID: nil)
 
-    let previousInputDeviceID: AudioDeviceID
-    let changedDefaultInputDevice: Bool
-    let shouldRestorePreviousInputDevice: Bool
+    let previousInputDeviceID: AudioDeviceID?
 
     static func installBuiltInMicrophoneAsDefaultInput() throws -> InputDeviceOverride {
         let previousInputDeviceID = try SystemAudioDeviceInspector.defaultInputDeviceID()
@@ -195,34 +190,24 @@ private struct InputDeviceOverride {
         _ inputDeviceID: AudioDeviceID,
         previousInputDeviceID: AudioDeviceID
     ) throws -> InputDeviceOverride {
-        let shouldRestorePreviousInputDevice = SystemAudioInputSelector
-            .shouldRestoreInputDeviceAfterRecording(previousInputDeviceID)
-
         guard inputDeviceID != previousInputDeviceID else {
-            return InputDeviceOverride(
-                previousInputDeviceID: previousInputDeviceID,
-                changedDefaultInputDevice: false,
-                shouldRestorePreviousInputDevice: shouldRestorePreviousInputDevice
-            )
+            return .none
         }
-
+        let restorePrevious = SystemAudioInputSelector.shouldRestoreInputDeviceAfterRecording(previousInputDeviceID)
         try SystemAudioDeviceInspector.setDefaultInputDeviceID(inputDeviceID)
-        return InputDeviceOverride(
-            previousInputDeviceID: previousInputDeviceID,
-            changedDefaultInputDevice: true,
-            shouldRestorePreviousInputDevice: shouldRestorePreviousInputDevice
-        )
+        return InputDeviceOverride(previousInputDeviceID: restorePrevious ? previousInputDeviceID : nil)
     }
 
     func restore() throws {
-        guard changedDefaultInputDevice, shouldRestorePreviousInputDevice else {
-            return
+        if let previousInputDeviceID {
+            try SystemAudioDeviceInspector.setDefaultInputDeviceID(previousInputDeviceID)
         }
-        try SystemAudioDeviceInspector.setDefaultInputDeviceID(previousInputDeviceID)
     }
 }
 
 private enum SystemAudioInputSelector {
+    private static let builtInMicrophoneCache = AudioInputDeviceCache()
+
     static func shouldRestoreInputDeviceAfterRecording(_ deviceID: AudioDeviceID) -> Bool {
         guard let deviceInfo = try? SystemAudioDeviceInspector.deviceInfo(for: deviceID) else {
             return true
@@ -235,6 +220,17 @@ private enum SystemAudioInputSelector {
     }
 
     static func builtInMicrophoneInputDeviceID() throws -> AudioDeviceID? {
+        try builtInMicrophoneCache.resolve(discover: discoverBuiltInMicrophone) { device in
+            guard let uid = device.uid,
+                  (try? SystemAudioDeviceInspector.deviceUID(for: device.id)) == uid
+            else {
+                return false
+            }
+            return SystemAudioDeviceInspector.hasInputStreams(device.id)
+        }
+    }
+
+    private static func discoverBuiltInMicrophone() throws -> AudioDeviceInfo? {
         let devices = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.builtInMicrophone],
             mediaType: .audio,
@@ -247,16 +243,9 @@ private enum SystemAudioInputSelector {
             return nil
         }
 
-        return try deviceID(matchingUID: builtInMic.uniqueID)
-    }
-
-    private static func deviceID(matchingUID targetUID: String) throws -> AudioDeviceID? {
         for deviceID in try SystemAudioDeviceInspector.allAudioDeviceIDs() {
-            guard let uid = try SystemAudioDeviceInspector.deviceInfo(for: deviceID).uid else {
-                continue
-            }
-            if uid == targetUID {
-                return deviceID
+            if (try? SystemAudioDeviceInspector.deviceUID(for: deviceID)) == builtInMic.uniqueID {
+                return AudioDeviceInfo(id: deviceID, name: builtInMic.localizedName, uid: builtInMic.uniqueID, transportType: nil)
             }
         }
         return nil

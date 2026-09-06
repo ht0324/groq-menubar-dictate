@@ -5,6 +5,7 @@ import Darwin
 import Foundation
 import OSLog
 
+@MainActor
 final class ClipboardAndPasteService {
     private let logger = Logger(subsystem: "com.huntae.groq-menubar-dictate", category: "paste")
 
@@ -17,68 +18,61 @@ final class ClipboardAndPasteService {
         return pasteboard.setString(text, forType: .string)
     }
 
-    func pasteFromClipboard() -> Bool {
-        if postCommandV(stateID: .combinedSessionState, tap: .cgSessionEventTap) {
-            logger.info("Posted Cmd+V using cgSessionEventTap/combinedSessionState.")
-            return true
+    /// Prepare during transcription, without reading the clipboard or posting keys.
+    func preparePaste() -> PreparedPaste? {
+        for (stateID, tap) in [
+            (CGEventSourceStateID.combinedSessionState, CGEventTapLocation.cgSessionEventTap),
+            (.hidSystemState, .cghidEventTap),
+        ] {
+            if let paste = PreparedPaste(stateID: stateID, tap: tap) {
+                return paste
+            }
         }
+        logger.error("Failed to prepare Cmd+V: could not create event source/events.")
+        return nil
+    }
+}
 
-        if postCommandV(stateID: .hidSystemState, tap: .cghidEventTap) {
-            logger.info("Posted Cmd+V using cghidEventTap/hidSystemState.")
-            return true
+@MainActor
+struct PreparedPaste {
+    private let events: [CGEvent]
+    private let tap: CGEventTapLocation
+
+    init?(stateID: CGEventSourceStateID, tap: CGEventTapLocation) {
+        guard let source = CGEventSource(stateID: stateID) else {
+            return nil
         }
-
-        logger.error("Failed to post Cmd+V: could not create event source/events.")
-        return false
+        let keys: [(Int, Bool, CGEventFlags)] = [
+            (kVK_Command, true, []),
+            (kVK_ANSI_V, true, .maskCommand),
+            (kVK_ANSI_V, false, .maskCommand),
+            (kVK_Command, false, []),
+        ]
+        var events: [CGEvent] = []
+        for (key, isDown, flags) in keys {
+            guard let event = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(key), keyDown: isDown) else {
+                return nil
+            }
+            event.flags = flags
+            events.append(event)
+        }
+        self.events = events
+        self.tap = tap
     }
 
-    private func postCommandV(stateID: CGEventSourceStateID, tap: CGEventTapLocation) -> Bool {
-        guard let source = CGEventSource(stateID: stateID) else {
-            logger.error("CGEventSource creation failed for stateID \(stateID.rawValue).")
-            return false
+    /// Refresh timestamps: these events may have waited through a network request.
+    /// Posting does not acknowledge insertion by the destination application.
+    func post(
+        postEvent: (CGEvent, CGEventTapLocation) -> Void = { $0.post(tap: $1) },
+        pause: (useconds_t) -> Void = { usleep($0) },
+        timestamp: () -> CGEventTimestamp = { DispatchTime.now().uptimeNanoseconds }
+    ) {
+        for (index, event) in events.enumerated() {
+            event.timestamp = timestamp()
+            postEvent(event, tap)
+            if index < events.count - 1 {
+                pause(2_000)
+            }
         }
-        guard let commandDown = CGEvent(
-            keyboardEventSource: source,
-            virtualKey: CGKeyCode(kVK_Command),
-            keyDown: true
-        ),
-            let commandUp = CGEvent(
-                keyboardEventSource: source,
-                virtualKey: CGKeyCode(kVK_Command),
-                keyDown: false
-            )
-        else {
-            logger.error("Failed creating Cmd key events.")
-            return false
-        }
-
-        guard let keyDown = CGEvent(
-            keyboardEventSource: source,
-            virtualKey: CGKeyCode(kVK_ANSI_V),
-            keyDown: true
-        ),
-            let keyUp = CGEvent(
-                keyboardEventSource: source,
-                virtualKey: CGKeyCode(kVK_ANSI_V),
-                keyDown: false
-            )
-        else {
-            logger.error("Failed creating V key events.")
-            return false
-        }
-
-        commandDown.flags = []
-        commandUp.flags = []
-        keyDown.flags = .maskCommand
-        keyUp.flags = .maskCommand
-
-        commandDown.post(tap: tap)
-        usleep(2_000)
-        keyDown.post(tap: tap)
-        usleep(2_000)
-        keyUp.post(tap: tap)
-        usleep(2_000)
-        commandUp.post(tap: tap)
-        return true
     }
 }

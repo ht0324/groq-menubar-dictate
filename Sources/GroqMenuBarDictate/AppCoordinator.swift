@@ -265,6 +265,7 @@ final class AppCoordinator: NSObject {
             isStartingRecording = false
         }
 
+        let start = DispatchTime.now()
         let status = permissions.microphoneAuthorizationStatus()
         let allowed: Bool
         switch status {
@@ -283,17 +284,32 @@ final class AppCoordinator: NSObject {
             return
         }
 
+        let permissionMilliseconds = millisecondsSince(start)
+        sounds.preparePing()
         do {
-            try recorder.startRecording(mode: settings.microphoneInputMode)
+            var startupTiming = try recorder.startRecording(mode: settings.microphoneInputMode)
+            startupTiming.permissionMilliseconds = permissionMilliseconds
+            startupTiming.readyMilliseconds = millisecondsSince(start)
+            let feedbackStart = DispatchTime.now()
             recordingSource = .manual
-            clearPendingRetryClip(deleteFile: true)
-            let hasListen = ensureEventPermission(.listen)
+            _ = RecordingStartTiming.measure(&startupTiming.retryCleanupMilliseconds) {
+                clearPendingRetryClip(deleteFile: true)
+            }
+            let hasListen = RecordingStartTiming.measure(&startupTiming.eventPermissionMilliseconds) {
+                permissions.ensureEventAccess(.listen)
+            }
+            let stateUpdateStart = DispatchTime.now()
             if hasListen {
                 setState(.recording, message: "Recording... tap Option to stop (Esc aborts).")
             } else {
                 setState(.recording, message: "Recording... tap Option to stop. (Esc abort unavailable: Input Monitoring missing)")
             }
+            startupTiming.stateUpdateMilliseconds = millisecondsSince(stateUpdateStart)
             sounds.playPing()
+            startupTiming.feedbackMilliseconds = millisecondsSince(feedbackStart)
+            if settings.performanceDiagnosticsEnabled {
+                startupTiming.log(to: logger)
+            }
         } catch {
             setError("Failed to start recording: \(error.localizedDescription)")
         }
@@ -395,7 +411,7 @@ final class AppCoordinator: NSObject {
 
         do {
             let transcribeStart = DispatchTime.now()
-            let response = try await transcriber.transcribe(
+            async let transcription = transcriber.transcribe(
                 fileURL: recordedClip.fileURL,
                 apiKey: apiKey,
                 model: model,
@@ -404,6 +420,16 @@ final class AppCoordinator: NSObject {
                 maxAudioBytes: maxAudioBytes,
                 collectMetrics: diagnosticsEnabled
             )
+            // Prepare events while the upload runs. This preflight never prompts;
+            // recheck at delivery in case permission changes during the request.
+            let pastePermissionStart = DispatchTime.now()
+            let pasteAccessGranted = autoPasteEnabled && permissions.hasEventAccess(.post)
+            timing.pastePreflightMilliseconds = autoPasteEnabled ? millisecondsSince(pastePermissionStart) : nil
+            let pastePreparationStart = DispatchTime.now()
+            var preparedPaste = pasteAccessGranted ? clipboard.preparePaste() : nil
+            timing.pastePreparationMilliseconds = pasteAccessGranted ? millisecondsSince(pastePreparationStart) : nil
+
+            let response = try await transcription
             timing.transcriptionMilliseconds = millisecondsSince(transcribeStart)
             if let metrics = response.metrics {
                 timing.apply(metrics)
@@ -445,41 +471,43 @@ final class AppCoordinator: NSObject {
             }
             timing.clipboardMilliseconds = millisecondsSince(clipboardStart)
 
+            var statusMessage = "Copied transcript (\(text.count) chars)."
+            var transientSeconds: TimeInterval = 4
+            timing.result = "copied"
             if autoPasteEnabled {
                 let pasteStart = DispatchTime.now()
-                let canPost = ensureEventPermission(.post)
-                if canPost, clipboard.pasteFromClipboard() {
-                    timing.pasteMilliseconds = millisecondsSince(pasteStart)
-                    timing.result = "pasted"
-                    timing.totalMilliseconds = millisecondsSince(flowStart)
-                    logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
-                    finalizeSuccessfulTranscriptDelivery(
-                        text: text,
-                        recordedClip: recordedClip,
-                        statusMessage: "Pasted transcript (\(text.count) chars)."
-                    )
-                } else {
-                    timing.pasteMilliseconds = millisecondsSince(pasteStart)
-                    timing.result = "copied_missing_post_permission"
-                    timing.totalMilliseconds = millisecondsSince(flowStart)
-                    logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
-                    finalizeSuccessfulTranscriptDelivery(
-                        text: text,
-                        recordedClip: recordedClip,
-                        statusMessage: "Copied transcript. Auto-paste needs Post Keyboard Events permission.",
-                        transientSeconds: 8
-                    )
+                let permissionStart = DispatchTime.now()
+                let canPost = permissions.ensureEventAccess(.post)
+                timing.pastePermissionMilliseconds = millisecondsSince(permissionStart)
+                if canPost, preparedPaste == nil {
+                    let preparationStart = DispatchTime.now()
+                    preparedPaste = clipboard.preparePaste()
+                    timing.pastePreparationMilliseconds = (timing.pastePreparationMilliseconds ?? 0)
+                        + millisecondsSince(preparationStart)
                 }
-            } else {
-                timing.result = "copied"
-                timing.totalMilliseconds = millisecondsSince(flowStart)
-                logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
-                finalizeSuccessfulTranscriptDelivery(
-                    text: text,
-                    recordedClip: recordedClip,
-                    statusMessage: "Copied transcript (\(text.count) chars)."
-                )
+                if canPost, let preparedPaste {
+                    let postStart = DispatchTime.now()
+                    preparedPaste.post()
+                    timing.pastePostMilliseconds = millisecondsSince(postStart)
+                    timing.result = "pasted"
+                    statusMessage = "Pasted transcript (\(text.count) chars)."
+                } else {
+                    timing.result = canPost ? "copied_paste_unavailable" : "copied_missing_post_permission"
+                    statusMessage = canPost
+                        ? "Copied transcript. Could not prepare auto-paste."
+                        : "Copied transcript. Auto-paste needs Post Keyboard Events permission."
+                    transientSeconds = 8
+                }
+                timing.pasteMilliseconds = millisecondsSince(pasteStart)
             }
+            timing.totalMilliseconds = millisecondsSince(flowStart)
+            logWorkflowTimingIfEnabled(timing, diagnosticsEnabled: diagnosticsEnabled)
+            finalizeSuccessfulTranscriptDelivery(
+                text: text,
+                recordedClip: recordedClip,
+                statusMessage: statusMessage,
+                transientSeconds: transientSeconds
+            )
         } catch {
             timing.result = "transcription_failed"
             timing.totalMilliseconds = millisecondsSince(flowStart)
@@ -542,6 +570,9 @@ final class AppCoordinator: NSObject {
     }
 
     private func setState(_ state: State, message: String) {
+        if state != .recording {
+            sounds.cancelPing()
+        }
         idleResetWorkItem?.cancel()
         idleResetWorkItem = nil
         optionTapRecognizer.setStopOnOptionPressEnabled(state == .recording)
@@ -802,10 +833,6 @@ final class AppCoordinator: NSObject {
 
     private func resolvedExecutablePath() -> String {
         ExecutablePathResolver.resolve(arguments: CommandLine.arguments) ?? ""
-    }
-
-    private func ensureEventPermission(_ access: PermissionService.EventAccess) -> Bool {
-        permissions.ensureEventAccess(access)
     }
 
     private func updateAudioActivityTriggerMonitor() async {

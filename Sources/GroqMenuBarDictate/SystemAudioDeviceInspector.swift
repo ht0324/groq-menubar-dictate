@@ -38,6 +38,11 @@ enum SystemAudioDeviceInspector {
         return try deviceInfo(for: deviceID)
     }
 
+    /// Unsupported or unreadable mute controls leave normal cue playback enabled.
+    static func isOutputMuted(_ deviceID: AudioDeviceID) -> Bool {
+        (try? uint32Property(kAudioDevicePropertyMute, for: deviceID, scope: kAudioDevicePropertyScopeOutput)) == 1
+    }
+
     static func setDefaultInputDeviceID(_ deviceID: AudioDeviceID) throws {
         var propertyAddress = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
@@ -123,9 +128,13 @@ enum SystemAudioDeviceInspector {
         AudioDeviceInfo(
             id: deviceID,
             name: try stringProperty(kAudioObjectPropertyName, for: deviceID),
-            uid: try stringProperty(kAudioDevicePropertyDeviceUID, for: deviceID),
+            uid: try deviceUID(for: deviceID),
             transportType: try uint32Property(kAudioDevicePropertyTransportType, for: deviceID)
         )
+    }
+
+    static func deviceUID(for deviceID: AudioDeviceID) throws -> String? {
+        try stringProperty(kAudioDevicePropertyDeviceUID, for: deviceID)
     }
 
     private static func defaultDeviceID(
@@ -190,11 +199,12 @@ enum SystemAudioDeviceInspector {
 
     private static func uint32Property(
         _ selector: AudioObjectPropertySelector,
-        for deviceID: AudioDeviceID
+        for deviceID: AudioDeviceID,
+        scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal
     ) throws -> UInt32? {
         var propertyAddress = AudioObjectPropertyAddress(
             mSelector: selector,
-            mScope: kAudioObjectPropertyScopeGlobal,
+            mScope: scope,
             mElement: kAudioObjectPropertyElementMain
         )
         guard AudioObjectHasProperty(deviceID, &propertyAddress) else {

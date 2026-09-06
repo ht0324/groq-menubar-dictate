@@ -55,14 +55,11 @@ final class PermissionService {
     }
 
     private func checkEventAccess(_ access: EventAccess, prompt: Bool) -> Bool {
-        if #available(macOS 10.15, *) {
-            switch access {
-            case .listen:
-                return prompt ? CGRequestListenEventAccess() : CGPreflightListenEventAccess()
-            case .post:
-                return prompt ? CGRequestPostEventAccess() : CGPreflightPostEventAccess()
-            }
+        switch access {
+        case .listen:
+            return prompt ? CGRequestListenEventAccess() : CGPreflightListenEventAccess()
+        case .post:
+            return prompt ? CGRequestPostEventAccess() : CGPreflightPostEventAccess()
         }
-        return true
     }
 }
