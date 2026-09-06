@@ -2,14 +2,12 @@ import Foundation
 
 final class CustomWordsStore {
     private let lineList: LineListFileStore
-    let wordsFileURL: URL
 
     init(fileManager: FileManager = .default, wordsFileURL: URL? = nil) {
         let resolvedURL = wordsFileURL ?? LineListFileStore.appSupportFileURL(
             fileManager: fileManager,
             fileName: "custom-words.txt"
         )
-        self.wordsFileURL = resolvedURL
         self.lineList = LineListFileStore(
             fileManager: fileManager,
             fileURL: resolvedURL,
@@ -21,11 +19,8 @@ final class CustomWordsStore {
         try lineList.ensureFileExists()
     }
 
-    func loadWords(limit: Int = 80) -> [String] {
-        lineList.loadEntries(limit: limit)
-    }
-
-    static func transcriptionPrompt(from words: [String]) -> String? {
+    func transcriptionPrompt() -> String? {
+        let words = lineList.loadEntries(limit: 80)
         guard !words.isEmpty else {
             return nil
         }
@@ -34,10 +29,6 @@ final class CustomWordsStore {
 
     func openWordsFile() throws {
         try lineList.openFile()
-    }
-
-    static func parseWords(from raw: String, limit: Int) -> [String] {
-        LineListFileStore.parseEntries(from: raw, limit: limit)
     }
 
     private static var initialFileContents: String {

@@ -19,7 +19,6 @@ final class AppCoordinator: NSObject {
     private let settings = SettingsStore()
     private let customWords = CustomWordsStore()
     private let filterWords = FilterWordsStore()
-    private let endPrunePhrases = EndPrunePhrasesStore()
     private let permissions = PermissionService()
     private let launchAtLogin = LaunchAtLoginService()
     private let recorder = AudioRecorderService()
@@ -120,8 +119,7 @@ final class AppCoordinator: NSObject {
 
         do {
             try customWords.ensureSeedFileExists()
-            try filterWords.ensureFileExists()
-            try endPrunePhrases.ensureFileExists()
+            try filterWords.ensureFilesExist()
         } catch {
             setError("Failed to prepare word files: \(error.localizedDescription)")
             return
@@ -395,9 +393,7 @@ final class AppCoordinator: NSObject {
         let maxAudioBytes = settings.maxAudioBytes
         let autoPasteEnabled = settings.autoPasteEnabled
         let endPruneEnabled = settings.endPruneEnabled
-        let promptWords = customWords.loadWords(limit: 80)
-        let prompt = CustomWordsStore.transcriptionPrompt(from: promptWords)
-        let endPrunePhraseList = endPruneEnabled ? endPrunePhrases.loadPhrases() : EndPrunePhrasesStore.defaultPhrases
+        let prompt = customWords.transcriptionPrompt()
         timing.promptPreparationMilliseconds = millisecondsSince(prepStart)
 
         guard !apiKey.isEmpty else {
@@ -438,8 +434,7 @@ final class AppCoordinator: NSObject {
             let postProcessingStart = DispatchTime.now()
             let filtered = filterWords.applyFilters(
                 to: response.text,
-                endPruneEnabled: endPruneEnabled,
-                endPrunePhrases: endPrunePhraseList
+                endPruneEnabled: endPruneEnabled
             )
             let text = filtered.trimmingCharacters(in: .whitespacesAndNewlines)
             timing.postProcessingMilliseconds = millisecondsSince(postProcessingStart)
@@ -703,7 +698,6 @@ final class AppCoordinator: NSObject {
 
     @objc private func openSettingsFromMenu() {
         let launchAtLoginEnabled = launchAtLogin.isEnabled
-        settings.launchAtLoginEnabled = launchAtLoginEnabled
         let snapshot = SettingsSnapshot(
             apiKey: settings.apiKey,
             autoPasteEnabled: settings.autoPasteEnabled,
@@ -743,7 +737,6 @@ final class AppCoordinator: NSObject {
         settings.autoPasteEnabled = snapshot.autoPasteEnabled
         settings.endPruneEnabled = snapshot.endPruneEnabled
         settings.performanceDiagnosticsEnabled = snapshot.performanceDiagnosticsEnabled
-        settings.launchAtLoginEnabled = snapshot.launchAtLoginEnabled
         settings.audioActivityTriggerEnabled = snapshot.audioActivityTriggerEnabled
         settings.microphoneInputMode = snapshot.microphoneInputMode
         settings.optionKeyMode = snapshot.optionKeyMode
@@ -814,7 +807,7 @@ final class AppCoordinator: NSObject {
 
     @objc private func openEndPrunePhrasesFromMenu() {
         do {
-            try endPrunePhrases.openPhrasesFile()
+            try filterWords.openEndPrunePhrasesFile()
             setIdleStatus("Opened end prune phrases file.")
         } catch {
             setError("Failed to open end prune phrases file: \(error.localizedDescription)")

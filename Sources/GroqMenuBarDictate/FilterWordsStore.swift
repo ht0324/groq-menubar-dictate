@@ -7,55 +7,67 @@ final class FilterWordsStore {
     }
 
     private let lineList: LineListFileStore
-    let wordsFileURL: URL
+    private let endPrunePhrases: LineListFileStore
     private var wordFilterRegexCache: RegexCache?
     private var endingPruneRegexCache: RegexCache?
 
-    init(fileManager: FileManager = .default, wordsFileURL: URL? = nil) {
-        let resolvedURL = wordsFileURL ?? LineListFileStore.appSupportFileURL(
-            fileManager: fileManager,
-            fileName: "filter-words.txt"
-        )
-        self.wordsFileURL = resolvedURL
+    init(
+        fileManager: FileManager = .default,
+        wordsFileURL: URL? = nil,
+        phrasesFileURL: URL? = nil
+    ) {
         self.lineList = LineListFileStore(
             fileManager: fileManager,
-            fileURL: resolvedURL,
+            fileURL: wordsFileURL ?? LineListFileStore.appSupportFileURL(
+                fileManager: fileManager,
+                fileName: "filter-words.txt"
+            ),
             initialContents: Self.initialFileContents
+        )
+        self.endPrunePhrases = LineListFileStore(
+            fileManager: fileManager,
+            fileURL: phrasesFileURL ?? LineListFileStore.appSupportFileURL(
+                fileManager: fileManager,
+                fileName: "end-prune-phrases.txt"
+            ),
+            initialContents: """
+            # One end-prune phrase per line.
+            # If transcript ends with one of these phrases (case-insensitive),
+            # it is removed (with optional trailing period and spaces).
+            # Remove all entries to leave trailing phrases unchanged.
+
+            thank you
+            thank you for watching
+            thanks for watching
+
+            """
         )
     }
 
-    func ensureFileExists() throws {
+    func ensureFilesExist() throws {
         try lineList.ensureFileExists()
+        try endPrunePhrases.ensureFileExists()
     }
 
     func openWordsFile() throws {
         try lineList.openFile()
     }
 
-    func loadWords(limit: Int = 200) -> [String] {
-        lineList.loadEntries(limit: limit)
+    func openEndPrunePhrasesFile() throws {
+        try endPrunePhrases.openFile()
     }
 
     func applyFilters(
         to text: String,
-        words: [String]? = nil,
-        endPruneEnabled: Bool = true,
-        endPrunePhrases: [String] = EndPrunePhrasesStore.defaultPhrases
+        endPruneEnabled: Bool = true
     ) -> String {
-        let filterWords = words ?? loadWords()
+        let filterWords = lineList.loadEntries(limit: 200)
         let filtered = Self.applyWordFilters(to: text, regex: wordFilterRegex(for: filterWords))
         guard endPruneEnabled else {
             return Self.trimTrailingWhitespace(filtered)
         }
-        return Self.applyEndingPruneRules(to: filtered, regex: endingPruneRegex(for: endPrunePhrases))
-    }
-
-    static func parseWords(from raw: String, limit: Int) -> [String] {
-        LineListFileStore.parseEntries(from: raw, limit: limit)
-    }
-
-    static func applyWordFilters(to text: String, words: [String]) -> String {
-        applyWordFilters(to: text, regex: removalRegex(for: words))
+        let phrases = endPrunePhrases.loadEntries(limit: 100)
+        return Self.applyEndingPruneRules(to: filtered, regex: endingPruneRegex(for: phrases))
     }
 
     private static func applyWordFilters(to text: String, regex: NSRegularExpression?) -> String {
@@ -63,13 +75,6 @@ final class FilterWordsStore {
             return text
         }
         return replaceMatches(in: text, regex: regex)
-    }
-
-    static func applyEndingPruneRules(
-        to text: String,
-        phrases: [String] = EndPrunePhrasesStore.defaultPhrases
-    ) -> String {
-        applyEndingPruneRules(to: text, regex: endingPruneRegex(for: phrases))
     }
 
     private static func applyEndingPruneRules(to text: String, regex: NSRegularExpression?) -> String {
@@ -110,10 +115,6 @@ final class FilterWordsStore {
         return regex
     }
 
-    private static func removalRegex(for words: [String]) -> NSRegularExpression? {
-        removalRegex(forNormalizedWords: normalizedFilterWords(from: words))
-    }
-
     private static func normalizedFilterWords(from words: [String]) -> [String] {
         words
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -136,10 +137,6 @@ final class FilterWordsStore {
             .joined(separator: "|")
         let pattern = #"(?<![\p{L}\p{N}_])(?:\#(alternation))(?:,[\t ]+|\.[\t ]+|\.|[\t ]+)"#
         return try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
-    }
-
-    private static func endingPruneRegex(for phrases: [String]) -> NSRegularExpression? {
-        endingPruneRegex(forNormalizedPhrases: normalizedPhrases(from: phrases))
     }
 
     private static func normalizedPhrases(from phrases: [String]) -> [String] {

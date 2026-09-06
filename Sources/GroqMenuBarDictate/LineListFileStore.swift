@@ -9,7 +9,6 @@ final class LineListFileStore {
 
     private let fileManager: FileManager
     private let initialContents: String
-    private let emptyFallbackEntries: [String]
     private var cache: EntriesCache?
 
     let fileURL: URL
@@ -17,13 +16,11 @@ final class LineListFileStore {
     init(
         fileManager: FileManager = .default,
         fileURL: URL,
-        initialContents: String,
-        emptyFallbackEntries: [String] = []
+        initialContents: String
     ) {
         self.fileManager = fileManager
         self.fileURL = fileURL
         self.initialContents = initialContents
-        self.emptyFallbackEntries = emptyFallbackEntries
     }
 
     func ensureFileExists() throws {
@@ -94,12 +91,11 @@ final class LineListFileStore {
         }
 
         guard let raw = try? String(contentsOf: fileURL, encoding: .utf8) else {
-            cache = EntriesCache(modificationDate: modificationDate, entries: emptyFallbackEntries)
-            return emptyFallbackEntries
+            cache = EntriesCache(modificationDate: modificationDate, entries: [])
+            return []
         }
 
-        let parsed = Self.parseEntries(from: raw, limit: Int.max)
-        let entries = parsed.isEmpty ? emptyFallbackEntries : parsed
+        let entries = Self.parseEntries(from: raw, limit: Int.max)
         cache = EntriesCache(modificationDate: modificationDate, entries: entries)
         return entries
     }

@@ -15,6 +15,20 @@ final class CustomWordsStoreTests: XCTestCase {
         try store.ensureSeedFileExists()
 
         XCTAssertTrue(fileManager.fileExists(atPath: wordsURL.path))
-        XCTAssertEqual(store.loadWords(limit: 10), [])
+        XCTAssertNil(store.transcriptionPrompt())
+    }
+
+    func testPromptUsesConfiguredWordsWithOriginalSpelling() throws {
+        let wordsURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CustomWordsStoreTests-\(UUID().uuidString).txt")
+        defer { try? FileManager.default.removeItem(at: wordsURL) }
+        try "# names\nAcme\nacme\nWidget Pro\n".write(to: wordsURL, atomically: true, encoding: .utf8)
+
+        let store = CustomWordsStore(wordsFileURL: wordsURL)
+
+        XCTAssertEqual(
+            store.transcriptionPrompt(),
+            "Use exact spelling for these terms if spoken: Acme, Widget Pro."
+        )
     }
 }

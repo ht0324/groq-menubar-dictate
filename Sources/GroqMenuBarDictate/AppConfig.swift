@@ -49,7 +49,6 @@ final class SettingsStore {
         static let autoPasteEnabled = "settings.autoPasteEnabled"
         static let endPruneEnabled = "settings.endPruneEnabled"
         static let performanceDiagnosticsEnabled = "settings.performanceDiagnosticsEnabled"
-        static let launchAtLoginEnabled = "settings.launchAtLoginEnabled"
         static let audioActivityTriggerEnabled = "settings.audioActivityTriggerEnabled"
         static let audioTriggerStartThresholdDBFS = "settings.audioTriggerStartThresholdDBFS"
         static let audioTriggerStopThresholdDBFS = "settings.audioTriggerStopThresholdDBFS"
@@ -116,18 +115,6 @@ final class SettingsStore {
         }
         set {
             defaults.set(newValue, forKey: Key.performanceDiagnosticsEnabled)
-        }
-    }
-
-    var launchAtLoginEnabled: Bool {
-        get {
-            if defaults.object(forKey: Key.launchAtLoginEnabled) == nil {
-                return false
-            }
-            return defaults.bool(forKey: Key.launchAtLoginEnabled)
-        }
-        set {
-            defaults.set(newValue, forKey: Key.launchAtLoginEnabled)
         }
     }
 

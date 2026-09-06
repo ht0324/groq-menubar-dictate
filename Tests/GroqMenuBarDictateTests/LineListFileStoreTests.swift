@@ -33,17 +33,16 @@ final class LineListFileStoreTests: XCTestCase {
         XCTAssertEqual(store.loadEntries(limit: 10), ["beta"])
     }
 
-    func testLoadEntriesUsesFallbackWhenFileHasNoEntries() throws {
+    func testLoadEntriesReturnsNoEntriesForCommentsOnlyFile() throws {
         let fixture = try LineListFixture(fileName: "entries.txt")
         defer { fixture.remove() }
         try "# comments only\n\n".write(to: fixture.fileURL, atomically: true, encoding: .utf8)
         let store = LineListFileStore(
             fileURL: fixture.fileURL,
-            initialContents: "",
-            emptyFallbackEntries: ["thank you"]
+            initialContents: "thank you\n"
         )
 
-        XCTAssertEqual(store.loadEntries(limit: 10), ["thank you"])
+        XCTAssertEqual(store.loadEntries(limit: 10), [])
     }
 }
 

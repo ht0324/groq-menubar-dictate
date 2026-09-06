@@ -69,15 +69,13 @@ enum LatencyProbeCommand {
             let maxAudioBytes = settings.maxAudioBytes
             let clipboard = ClipboardAndPasteService()
             let transcriber = GroqTranscriptionService()
+            let filterWords = FilterWordsStore()
+            try filterWords.ensureFilesExist()
 
             let totalStart = DispatchTime.now()
             let prepStart = DispatchTime.now()
-            let promptWords = CustomWordsStore().loadWords(limit: 80)
-            let prompt = CustomWordsStore.transcriptionPrompt(from: promptWords)
+            let prompt = CustomWordsStore().transcriptionPrompt()
             let endPruneEnabled = settings.endPruneEnabled
-            let endPrunePhrases = endPruneEnabled
-                ? EndPrunePhrasesStore().loadPhrases()
-                : EndPrunePhrasesStore.defaultPhrases
             let audioDurationSeconds = AudioRecorderService.fileDuration(at: audioURL)
             let prepMilliseconds = millisecondsSince(prepStart)
 
@@ -95,10 +93,9 @@ enum LatencyProbeCommand {
             let transcriptionMilliseconds = millisecondsSince(transcribeStart)
 
             let postProcessingStart = DispatchTime.now()
-            let filtered = FilterWordsStore().applyFilters(
+            let filtered = filterWords.applyFilters(
                 to: response.text,
-                endPruneEnabled: endPruneEnabled,
-                endPrunePhrases: endPrunePhrases
+                endPruneEnabled: endPruneEnabled
             )
             let text = filtered.trimmingCharacters(in: .whitespacesAndNewlines)
             let postProcessingMilliseconds = millisecondsSince(postProcessingStart)

@@ -50,6 +50,8 @@ Bolt also reads three local files for words and cleanup rules:
 | `~/Library/Application Support/groq-menubar-dictate/filter-words.txt` | Removes matching text chunks case-insensitively. |
 | `~/Library/Application Support/groq-menubar-dictate/end-prune-phrases.txt` | Trims trailing phrases such as `thank you` or `thanks for watching`. |
 
+Default end-prune phrases are added only when the file is first created. Emptying the file disables phrase removal; Bolt does not restore entries you remove.
+
 ## Permissions and privacy
 
 Bolt may ask for microphone access to record audio, Input Monitoring to detect the global Option and Escape keys, and permission to post keyboard events for Cmd+V.
